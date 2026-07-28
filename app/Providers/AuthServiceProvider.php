@@ -2,9 +2,11 @@
 
 namespace App\Providers;
 
+use App\Models\DefenseSchedule;
 use App\Models\Student;
 use App\Models\Thesis;
 use App\Models\User;
+use App\Policies\DefenseSchedulePolicy;
 use App\Policies\StudentPolicy;
 use App\Policies\ThesisPolicy;
 use App\Policies\UserPolicy;
@@ -16,6 +18,7 @@ class AuthServiceProvider extends ServiceProvider
         User::class => UserPolicy::class,
         Student::class => StudentPolicy::class,
         Thesis::class => ThesisPolicy::class,
+        DefenseSchedule::class => DefenseSchedulePolicy::class,
     ];
 
     public function boot(): void

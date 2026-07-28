@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Auth\AuthController;
+use App\Http\Controllers\Api\Defense\DefenseScheduleController;
 use App\Http\Controllers\Api\Lookup\LookupController;
 use App\Http\Controllers\Api\Student\StudentController;
 use App\Http\Controllers\Api\Thesis\ThesisCommentController;
@@ -41,9 +42,20 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::get('theses/{thesis}/comments', [ThesisCommentController::class, 'index']);
     Route::post('theses/{thesis}/comments', [ThesisCommentController::class, 'store']);
 
+    Route::get('defense-schedules/calendar', [DefenseScheduleController::class, 'calendar']);
+    Route::post('defense-schedules', [DefenseScheduleController::class, 'store']);
+    Route::get('defense-schedules/{defense_schedule}', [DefenseScheduleController::class, 'show']);
+    Route::put('defense-schedules/{defense_schedule}', [DefenseScheduleController::class, 'update']);
+    Route::post('defense-schedules/{defense_schedule}/assign-jury', [DefenseScheduleController::class, 'assignJury']);
+    Route::post('defense-schedules/{defense_schedule}/cancel', [DefenseScheduleController::class, 'cancel']);
+    Route::post('defense-schedules/{defense_schedule}/result', [DefenseScheduleController::class, 'recordResult']);
+    Route::get('defense-schedules/{defense_schedule}/report', [DefenseScheduleController::class, 'generateReport']);
+
     Route::prefix('lookups')->group(function () {
         Route::get('departments', [LookupController::class, 'departments']);
         Route::get('programs', [LookupController::class, 'programs']);
         Route::get('academic-years', [LookupController::class, 'academicYears']);
+        Route::get('defense-rooms', [LookupController::class, 'defenseRooms']);
+        Route::get('jury-members', [LookupController::class, 'juryMembers']);
     });
 });
