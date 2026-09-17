@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\Defense\DefenseScheduleController;
 use App\Http\Controllers\Api\Lookup\LookupController;
 use App\Http\Controllers\Api\Student\StudentController;
+use App\Http\Controllers\Api\Supervisor\SupervisorController;
 use App\Http\Controllers\Api\Thesis\ThesisCommentController;
 use App\Http\Controllers\Api\Thesis\ThesisController;
 use App\Http\Controllers\Api\Thesis\ThesisVersionController;
@@ -29,6 +30,7 @@ Route::prefix('auth')->group(function () {
 
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::apiResource('students', StudentController::class);
+    Route::apiResource('supervisors', SupervisorController::class);
 
     Route::apiResource('theses', ThesisController::class);
     Route::post('theses/{thesis}/submit', [ThesisController::class, 'submit']);
@@ -57,5 +59,6 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('academic-years', [LookupController::class, 'academicYears']);
         Route::get('defense-rooms', [LookupController::class, 'defenseRooms']);
         Route::get('jury-members', [LookupController::class, 'juryMembers']);
+        Route::get('supervisors', [LookupController::class, 'supervisors']);
     });
 });
