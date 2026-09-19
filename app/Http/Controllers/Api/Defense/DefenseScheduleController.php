@@ -12,9 +12,11 @@ use App\Http\Requests\Defense\UpdateDefenseScheduleRequest;
 use App\Http\Resources\DefenseResultResource;
 use App\Http\Resources\DefenseScheduleResource;
 use App\Models\DefenseSchedule;
+use App\Models\JuryMember;
 use App\Services\Interfaces\DefenseScheduleServiceInterface;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 
 class DefenseScheduleController extends Controller
@@ -32,6 +34,33 @@ class DefenseScheduleController extends Controller
             \Carbon\Carbon::parse($data['to']),
             $data
         );
+
+        return response()->json([
+            'data' => DefenseScheduleResource::collection($schedules),
+        ]);
+    }
+
+    public function mine(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $query = DefenseSchedule::with(['thesis.student.user', 'thesis.supervisor.user', 'room', 'juryMembers.user']);
+
+        if ($user->role?->slug === 'jury-member') {
+            $juryMember = JuryMember::where('user_id', $user->id)->first();
+            $query->whereHas('juryMembers', function ($q) use ($juryMember) {
+                $q->where('jury_members.id', $juryMember?->id ?? 0);
+            });
+        } elseif ($user->role?->slug === 'supervisor') {
+            $query->whereHas('thesis.supervisor', function ($q) use ($user) {
+                $q->where('user_id', $user->id);
+            });
+        } elseif ($user->role?->slug === 'student') {
+            $query->whereHas('thesis.student', function ($q) use ($user) {
+                $q->where('user_id', $user->id);
+            });
+        }
+
+        $schedules = $query->orderBy('scheduled_at')->get();
 
         return response()->json([
             'data' => DefenseScheduleResource::collection($schedules),

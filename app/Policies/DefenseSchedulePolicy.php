@@ -32,7 +32,13 @@ class DefenseSchedulePolicy
         return in_array($user->role?->slug, ['administrator', 'head-of-department'], true);
     }
 
-    public function recordResult(User $user, DefenseSchedule $schedule): bool
+    public function submitEvaluation(User $user, DefenseSchedule $schedule): bool
+    {
+        return $user->role?->slug === 'jury-member'
+            && $schedule->juryMembers()->where('user_id', $user->id)->exists();
+    }
+
+    public function viewEvaluations(User $user, DefenseSchedule $schedule): bool
     {
         if (in_array($user->role?->slug, ['administrator', 'head-of-department'], true)) {
             return true;
@@ -40,6 +46,11 @@ class DefenseSchedulePolicy
 
         return $user->role?->slug === 'jury-member'
             && $schedule->juryMembers()->where('user_id', $user->id)->exists();
+    }
+
+    public function recordResult(User $user, DefenseSchedule $schedule): bool
+    {
+        return in_array($user->role?->slug, ['administrator', 'head-of-department'], true);
     }
 
     public function generateReport(User $user, DefenseSchedule $schedule): bool

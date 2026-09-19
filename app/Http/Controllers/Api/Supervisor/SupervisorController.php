@@ -9,13 +9,11 @@ use App\Http\Requests\Supervisor\UpdateSupervisorRequest;
 use App\Http\Resources\SupervisorResource;
 use App\Models\Supervisor;
 use App\Services\Interfaces\SupervisorServiceInterface;
-use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class SupervisorController extends Controller
 {
-    use AuthorizesRequests;
-
     public function __construct(protected SupervisorServiceInterface $supervisorService)
     {
     }
@@ -33,6 +31,19 @@ class SupervisorController extends Controller
                 'total' => $supervisors->total(),
             ],
         ]);
+    }
+
+    public function me(Request $request): JsonResponse
+    {
+        $supervisor = Supervisor::with(['user', 'department'])
+            ->where('user_id', $request->user()->id)
+            ->first();
+
+        if (!$supervisor) {
+            return response()->json(['message' => 'No supervisor profile found for this account.'], 404);
+        }
+
+        return response()->json(['data' => new SupervisorResource($supervisor)]);
     }
 
     public function store(StoreSupervisorRequest $request): JsonResponse

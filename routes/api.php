@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Auth\AuthController;
+use App\Http\Controllers\Api\Defense\DefenseJuryEvaluationController;
 use App\Http\Controllers\Api\Defense\DefenseScheduleController;
 use App\Http\Controllers\Api\Lookup\LookupController;
 use App\Http\Controllers\Api\Student\StudentController;
@@ -30,6 +31,8 @@ Route::prefix('auth')->group(function () {
 
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::apiResource('students', StudentController::class);
+
+    Route::get('supervisors/me', [SupervisorController::class, 'me']);
     Route::apiResource('supervisors', SupervisorController::class);
 
     Route::apiResource('theses', ThesisController::class);
@@ -45,6 +48,7 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::post('theses/{thesis}/comments', [ThesisCommentController::class, 'store']);
 
     Route::get('defense-schedules/calendar', [DefenseScheduleController::class, 'calendar']);
+    Route::get('defense-schedules/mine', [DefenseScheduleController::class, 'mine']);
     Route::post('defense-schedules', [DefenseScheduleController::class, 'store']);
     Route::get('defense-schedules/{defense_schedule}', [DefenseScheduleController::class, 'show']);
     Route::put('defense-schedules/{defense_schedule}', [DefenseScheduleController::class, 'update']);
@@ -52,6 +56,9 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::post('defense-schedules/{defense_schedule}/cancel', [DefenseScheduleController::class, 'cancel']);
     Route::post('defense-schedules/{defense_schedule}/result', [DefenseScheduleController::class, 'recordResult']);
     Route::get('defense-schedules/{defense_schedule}/report', [DefenseScheduleController::class, 'generateReport']);
+
+    Route::get('defense-schedules/{defense_schedule}/evaluations', [DefenseJuryEvaluationController::class, 'index']);
+    Route::post('defense-schedules/{defense_schedule}/evaluations', [DefenseJuryEvaluationController::class, 'store']);
 
     Route::prefix('lookups')->group(function () {
         Route::get('departments', [LookupController::class, 'departments']);

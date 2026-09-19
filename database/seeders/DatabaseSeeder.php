@@ -16,6 +16,7 @@ class DatabaseSeeder extends Seeder
             ProgramSeeder::class,
             AcademicYearSeeder::class,
             DefenseRoomSeeder::class,
+            DemoAccountSeeder::class,
         ]);
     }
 }
