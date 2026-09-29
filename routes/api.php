@@ -1,5 +1,9 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\AcademicYearController;
+use App\Http\Controllers\Api\Admin\DepartmentController;
+use App\Http\Controllers\Api\Admin\ProgramController;
+use App\Http\Controllers\Api\Admin\UserManagementController;
 use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\Defense\DefenseJuryEvaluationController;
 use App\Http\Controllers\Api\Defense\DefenseScheduleController;
@@ -67,5 +71,14 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('defense-rooms', [LookupController::class, 'defenseRooms']);
         Route::get('jury-members', [LookupController::class, 'juryMembers']);
         Route::get('supervisors', [LookupController::class, 'supervisors']);
+    });
+
+    Route::prefix('admin')->group(function () {
+        Route::apiResource('departments', DepartmentController::class)->except(['show']);
+        Route::get('departments/{department}', [DepartmentController::class, 'show']);
+        Route::apiResource('programs', ProgramController::class)->except(['show']);
+        Route::apiResource('academic-years', AcademicYearController::class)->except(['show']);
+        Route::get('users', [UserManagementController::class, 'index']);
+        Route::post('users/{user}/toggle-active', [UserManagementController::class, 'toggleActive']);
     });
 });
