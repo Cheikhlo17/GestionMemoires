@@ -3,7 +3,9 @@
 use App\Http\Controllers\Api\Admin\AcademicYearController;
 use App\Http\Controllers\Api\Admin\DepartmentController;
 use App\Http\Controllers\Api\Admin\ProgramController;
+use App\Http\Controllers\Api\Admin\ThesisArchiveController;
 use App\Http\Controllers\Api\Admin\UserManagementController;
+use App\Http\Controllers\Api\Archive\ArchiveController;
 use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\Defense\DefenseJuryEvaluationController;
 use App\Http\Controllers\Api\Defense\DefenseScheduleController;
@@ -31,6 +33,13 @@ Route::prefix('auth')->group(function () {
         Route::post('profile', [AuthController::class, 'updateProfile']);
         Route::post('resend-verification', [AuthController::class, 'resendVerification']);
     });
+});
+
+// Public digital library — no authentication required, read-only.
+Route::prefix('archives')->group(function () {
+    Route::get('/', [ArchiveController::class, 'index']);
+    Route::get('/{archive}', [ArchiveController::class, 'show']);
+    Route::get('/{archive}/download', [ArchiveController::class, 'download']);
 });
 
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
@@ -80,5 +89,18 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::apiResource('academic-years', AcademicYearController::class)->except(['show']);
         Route::get('users', [UserManagementController::class, 'index']);
         Route::post('users/{user}/toggle-active', [UserManagementController::class, 'toggleActive']);
+
+        Route::middleware('role:administrator,head-of-department')->group(function () {
+            Route::get('theses/{thesis}/archive-eligibility', [ThesisArchiveController::class, 'eligibility']);
+            Route::post('theses/{thesis}/archive', [ThesisArchiveController::class, 'store']);
+            Route::get('archives', [ThesisArchiveController::class, 'index']);
+            Route::get('archives/{archive}', [ThesisArchiveController::class, 'show']);
+            Route::put('archives/{archive}', [ThesisArchiveController::class, 'update']);
+            Route::get('archives/{archive}/download', [ThesisArchiveController::class, 'download']);
+        });
+
+        Route::middleware('role:administrator')->group(function () {
+            Route::delete('archives/{archive}', [ThesisArchiveController::class, 'destroy']);
+        });
     });
 });

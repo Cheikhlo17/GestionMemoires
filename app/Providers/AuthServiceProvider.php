@@ -7,11 +7,13 @@ use App\Models\Department;
 use App\Models\Student;
 use App\Models\Supervisor;
 use App\Models\Thesis;
+use App\Models\ThesisArchive;
 use App\Models\User;
 use App\Policies\DefenseSchedulePolicy;
 use App\Policies\DepartmentPolicy;
 use App\Policies\StudentPolicy;
 use App\Policies\SupervisorPolicy;
+use App\Policies\ThesisArchivePolicy;
 use App\Policies\ThesisPolicy;
 use App\Policies\UserPolicy;
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
@@ -25,6 +27,7 @@ class AuthServiceProvider extends ServiceProvider
         Thesis::class => ThesisPolicy::class,
         DefenseSchedule::class => DefenseSchedulePolicy::class,
         Department::class => DepartmentPolicy::class,
+        ThesisArchive::class => ThesisArchivePolicy::class,
     ];
 
     public function boot(): void

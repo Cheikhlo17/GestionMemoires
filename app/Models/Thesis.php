@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Model;
 
@@ -71,12 +72,6 @@ class Thesis extends Model
         return $this->hasMany(ThesisVersion::class)->orderByDesc('version_number');
     }
 
-    public function latestVersion(): BelongsTo
-    {
-        return $this->belongsTo(ThesisVersion::class, 'id', 'thesis_id')
-            ->ofMany('version_number', 'max');
-    }
-
     public function comments(): HasMany
     {
         return $this->hasMany(Comment::class)->orderByDesc('created_at');
@@ -85,5 +80,15 @@ class Thesis extends Model
     public function statusHistories(): HasMany
     {
         return $this->hasMany(ThesisStatusHistory::class)->orderByDesc('created_at');
+    }
+
+    public function archive(): HasOne
+    {
+        return $this->hasOne(ThesisArchive::class);
+    }
+
+    public function defenseSchedule(): HasOne
+    {
+        return $this->hasOne(DefenseSchedule::class);
     }
 }

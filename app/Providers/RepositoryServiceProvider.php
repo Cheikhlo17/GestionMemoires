@@ -18,9 +18,11 @@ use App\Services\Interfaces\AuthServiceInterface;
 use App\Services\Interfaces\DefenseScheduleServiceInterface;
 use App\Services\Interfaces\StudentServiceInterface;
 use App\Services\Interfaces\SupervisorServiceInterface;
+use App\Services\Interfaces\ThesisArchiveServiceInterface;
 use App\Services\Interfaces\ThesisServiceInterface;
 use App\Services\StudentService;
 use App\Services\SupervisorService;
+use App\Services\ThesisArchiveService;
 use App\Services\ThesisService;
 use Illuminate\Support\ServiceProvider;
 
@@ -42,6 +44,8 @@ class RepositoryServiceProvider extends ServiceProvider
 
         $this->app->bind(DefenseScheduleRepositoryInterface::class, DefenseScheduleRepository::class);
         $this->app->bind(DefenseScheduleServiceInterface::class, DefenseScheduleService::class);
+
+        $this->app->bind(ThesisArchiveServiceInterface::class, ThesisArchiveService::class);
     }
 
     public function boot(): void
