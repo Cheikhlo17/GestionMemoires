@@ -17,8 +17,6 @@ class StudentResource extends JsonResource
             'first_name' => $this->user->first_name,
             'last_name' => $this->user->last_name,
             'full_name' => $this->user->full_name,
-            'email' => $this->user->email,
-            'phone' => $this->user->phone,
             'department' => new DepartmentResource($this->whenLoaded('department')),
             'program' => new ProgramResource($this->whenLoaded('program')),
             'academic_year' => new AcademicYearResource($this->whenLoaded('academicYear')),

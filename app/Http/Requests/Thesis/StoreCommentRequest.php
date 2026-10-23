@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Thesis;
 
+use Illuminate\Validation\Rule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreCommentRequest extends FormRequest
@@ -13,9 +14,14 @@ class StoreCommentRequest extends FormRequest
 
     public function rules(): array
     {
+        $thesis = $this->route('thesis');
+
         return [
             'content' => ['required', 'string', 'max:3000'],
-            'thesis_version_id' => ['nullable', 'exists:thesis_versions,id'],
+            'thesis_version_id' => [
+                'nullable',
+                Rule::exists('thesis_versions', 'id')->where('thesis_id', $thesis?->id),
+            ],
         ];
     }
 }

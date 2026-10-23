@@ -2,6 +2,7 @@
 
 namespace App\Policies;
 
+use App\Models\Department;
 use App\Models\Thesis;
 use App\Models\User;
 
@@ -9,12 +10,19 @@ class ThesisPolicy
 {
     public function viewAny(User $user): bool
     {
-        return true;
+        return in_array($user->role?->slug, [
+            'administrator',
+            'head-of-department',
+            'supervisor',
+            'student',
+        ], true);
     }
 
     public function view(User $user, Thesis $thesis): bool
     {
-        return $this->isParticipant($user, $thesis) || $this->isPrivileged($user);
+        return $this->isParticipant($user, $thesis)
+            || $user->role?->slug === 'administrator'
+            || $this->isDepartmentHeadOf($user, $thesis);
     }
 
     public function create(User $user): bool
@@ -39,12 +47,14 @@ class ThesisPolicy
 
     public function comment(User $user, Thesis $thesis): bool
     {
-        return $this->isParticipant($user, $thesis) || $this->isPrivileged($user);
+        return $this->isParticipant($user, $thesis)
+            || $user->role?->slug === 'administrator'
+            || $this->isDepartmentHeadOf($user, $thesis);
     }
 
     public function assignSupervisor(User $user, Thesis $thesis): bool
     {
-        return in_array($user->role?->slug, ['administrator', 'head-of-department'], true);
+        return $user->role?->slug === 'administrator' || $this->isDepartmentHeadOf($user, $thesis);
     }
 
     public function changeStatus(User $user, Thesis $thesis): bool
@@ -60,7 +70,7 @@ class ThesisPolicy
         }
 
         if ($role === 'head-of-department') {
-            return true;
+            return $this->isDepartmentHeadOf($user, $thesis);
         }
 
         return false;
@@ -72,8 +82,11 @@ class ThesisPolicy
             || $user->id === $thesis->supervisor?->user_id;
     }
 
-    private function isPrivileged(User $user): bool
+    private function isDepartmentHeadOf(User $user, Thesis $thesis): bool
     {
-        return in_array($user->role?->slug, ['administrator', 'head-of-department'], true);
+        return $user->role?->slug === 'head-of-department'
+            && Department::whereKey($thesis->department_id)
+                ->where('head_of_department_id', $user->id)
+                ->exists();
     }
 }

@@ -26,6 +26,8 @@ class DefenseScheduleRepository implements DefenseScheduleRepositoryInterface
             $query->where('status', $filters['status']);
         }
 
+        $this->applyViewerScope($query, $filters);
+
         return $query->orderBy('scheduled_at')->get();
     }
 
@@ -60,27 +62,53 @@ class DefenseScheduleRepository implements DefenseScheduleRepositoryInterface
 
     public function hasRoomConflict(int $roomId, \DateTimeInterface $start, \DateTimeInterface $end, ?int $exceptId = null): bool
     {
-        return $this->model
+        $candidateSchedules = $this->model
             ->where('defense_room_id', $roomId)
             ->where('status', '!=', DefenseSchedule::STATUS_CANCELLED)
             ->when($exceptId, fn ($q) => $q->where('id', '!=', $exceptId))
-            ->where(function ($q) use ($start, $end) {
-                $q->whereRaw('scheduled_at < ? AND DATE_ADD(scheduled_at, INTERVAL duration_minutes MINUTE) > ?', [$end, $start]);
-            })
-            ->exists();
+            ->where('scheduled_at', '<', $end)
+            ->get(['scheduled_at', 'duration_minutes']);
+
+        return $candidateSchedules->contains(
+            fn (DefenseSchedule $schedule) => $schedule->ends_at > $start
+        );
     }
 
     public function hasJuryConflict(array $juryMemberIds, \DateTimeInterface $start, \DateTimeInterface $end, ?int $exceptId = null): bool
     {
-        return $this->model
+        $candidateSchedules = $this->model
             ->whereHas('juryMembers', function ($q) use ($juryMemberIds) {
                 $q->whereIn('jury_members.id', $juryMemberIds);
             })
             ->where('status', '!=', DefenseSchedule::STATUS_CANCELLED)
             ->when($exceptId, fn ($q) => $q->where('id', '!=', $exceptId))
-            ->where(function ($q) use ($start, $end) {
-                $q->whereRaw('scheduled_at < ? AND DATE_ADD(scheduled_at, INTERVAL duration_minutes MINUTE) > ?', [$end, $start]);
-            })
-            ->exists();
+            ->where('scheduled_at', '<', $end)
+            ->get(['scheduled_at', 'duration_minutes']);
+
+        return $candidateSchedules->contains(
+            fn (DefenseSchedule $schedule) => $schedule->ends_at > $start
+        );
+    }
+
+    private function applyViewerScope($query, array $filters): void
+    {
+        $viewerRole = $filters['_viewer_role'] ?? null;
+        $viewerId = $filters['_viewer_id'] ?? null;
+
+        if ($viewerRole === 'administrator') {
+            return;
+        }
+
+        if ($viewerRole === 'head-of-department') {
+            $query->whereHas('thesis.department', fn ($q) => $q->where('head_of_department_id', $viewerId));
+        } elseif ($viewerRole === 'student') {
+            $query->whereHas('thesis.student', fn ($q) => $q->where('user_id', $viewerId));
+        } elseif ($viewerRole === 'supervisor') {
+            $query->whereHas('thesis.supervisor', fn ($q) => $q->where('user_id', $viewerId));
+        } elseif ($viewerRole === 'jury-member') {
+            $query->whereHas('juryMembers', fn ($q) => $q->where('jury_members.user_id', $viewerId));
+        } else {
+            $query->whereKey(0);
+        }
     }
 }

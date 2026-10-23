@@ -83,12 +83,14 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     });
 
     Route::prefix('admin')->group(function () {
-        Route::apiResource('departments', DepartmentController::class)->except(['show']);
-        Route::get('departments/{department}', [DepartmentController::class, 'show']);
-        Route::apiResource('programs', ProgramController::class)->except(['show']);
-        Route::apiResource('academic-years', AcademicYearController::class)->except(['show']);
-        Route::get('users', [UserManagementController::class, 'index']);
-        Route::post('users/{user}/toggle-active', [UserManagementController::class, 'toggleActive']);
+        Route::middleware('role:administrator')->group(function () {
+            Route::apiResource('departments', DepartmentController::class)->except(['show']);
+            Route::get('departments/{department}', [DepartmentController::class, 'show']);
+            Route::apiResource('programs', ProgramController::class)->except(['show']);
+            Route::apiResource('academic-years', AcademicYearController::class)->except(['show']);
+            Route::get('users', [UserManagementController::class, 'index']);
+            Route::post('users/{user}/toggle-active', [UserManagementController::class, 'toggleActive']);
+        });
 
         Route::middleware('role:administrator,head-of-department')->group(function () {
             Route::get('theses/{thesis}/archive-eligibility', [ThesisArchiveController::class, 'eligibility']);

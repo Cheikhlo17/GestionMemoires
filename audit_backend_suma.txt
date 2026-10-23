@@ -1,0 +1,531 @@
+AUDIT TECHNIQUE DU BACKEND SUMA
+Date : 20 octobre 2026
+Périmètre : analyse statique du dépôt Laravel, sans accès à la base réelle et sans modification préalable du code.
+
+======================================================================
+A. RÉSUMÉ EXÉCUTIF
+======================================================================
+
+Le dépôt contient un backend Laravel assez étendu : authentification par jetons Sanctum, comptes étudiants et encadreurs, mémoires et versions, commentaires, planification et résultats de soutenance, archivage, gestion administrative et notifications. L’architecture s’appuie sur des contrôleurs API, des Form Requests, des ressources JSON, des services et des repositories.
+
+L’état général est toutefois partiel : plusieurs parcours existent dans le code, mais leurs autorisations, leurs contrôles d’intégrité ou leurs dépendances au schéma ne sont pas cohérents. Les constats les plus importants sont :
+
+- CRITIQUE — attribution de rôle lors de l’inscription publique : RegisterRequest accepte un role_id fourni par le demandeur ; AuthService::register l’utilise pour créer le compte. Un visiteur peut donc demander un rôle privilégié si son identifiant existe.
+- ÉLEVÉ — consultations insuffisamment limitées : la liste des mémoires, le calendrier des soutenances et plusieurs vues de ressources reposent sur des policies permissives et n’appliquent pas systématiquement de périmètre par rôle ou par dossier.
+- ÉLEVÉ — recherche publique d’archives : le orWhereJsonContains non regroupé dans ThesisArchiveService peut faire apparaître des archives privées dans une recherche publique par mot-clé.
+- ÉLEVÉ — archive liée à une mauvaise version : l’identifiant thesis_version_id fourni lors de l’archivage est vérifié globalement, mais pas contre le mémoire archivé ni contre le type PDF.
+- Autorisations administratives inégales : certaines routes sous /api/admin ne vérifient pas le rôle administrateur, notamment la suppression d’une année académique.
+- Tests métier absents : les deux tests présents sont des tests d’exemple et ne couvrent ni les routes métier ni les autorisations.
+
+L’audit est statique et en lecture seule. Aucune migration, aucun test et aucune opération sur la base réelle n’ont été exécutés. La commande non destructive php artisan route:list --json n’a pas produit de résultat dans le délai d’attente et a été arrêtée ; le catalogue ci-dessous est reconstitué à partir des déclarations de routes et de leurs contrôleurs.
+
+Deux fichiers étaient déjà modifiés dans l’arbre de travail au début de l’audit. Les constats décrivent leur contenu actuel ; ces modifications ne proviennent pas de cet audit :
+
+- app/Http/Controllers/Api/Thesis/ThesisController.php : store traite l’absence de profil étudiant et refuse un deuxième mémoire, y compris après suppression logique.
+- app/Services/ThesisService.php : la transition approved -> archived est désactivée dans la table des transitions. L’archivage modifie néanmoins directement le statut par un autre chemin.
+
+======================================================================
+B. ARCHITECTURE LARAVEL
+======================================================================
+
+- Versions déclarées/verrouillées : PHP ^8.2 et Laravel 12.64.0 dans composer.json et composer.lock. Le runtime PHP effectivement utilisé n’a pas été confirmé.
+- Organisation : contrôleurs par domaine sous app/Http/Controllers/Api, validations sous app/Http/Requests, transformations JSON sous app/Http/Resources, modèles Eloquent, services et interfaces, repositories, policies et middleware.
+- Providers : les policies et bindings de services/repositories sont enregistrés via bootstrap/providers.php, AuthServiceProvider.php et RepositoryServiceProvider.php.
+- Routes : le préfixe /api est configuré dans bootstrap/app.php. Un groupe commun applique auth:sanctum et active à la plupart des routes métier.
+- Routes non métier : routes/web.php déclare GET / vers la page welcome. routes/console.php déclare la commande inspire. Le point de santé /up est configuré dans bootstrap/app.php.
+- Frontend : aucun code Angular n’a été trouvé dans cet espace de travail. Le JavaScript présent se limite à resources/js, avec Vite et Axios déclarés dans package.json.
+
+======================================================================
+C. CATALOGUE DES ROUTES API
+======================================================================
+
+Toutes les URI ci-dessous sont préfixées par /api. Sauf indication contraire, les réponses métier sont JSON, généralement avec data, parfois message et meta. Les Form Requests mentionnées assurent la validation et, pour certaines, l’autorisation.
+
+AUTHENTIFICATION
+
+- POST /api/auth/register
+  Contrôleur : AuthController::register.
+  Middleware : aucun middleware d’authentification.
+  Fonction/validation : RegisterRequest valide identité, email, mot de passe et rôle existant. Crée un utilisateur et un jeton Sanctum. Tables users, roles, personal_access_tokens.
+  Réponse/état : 201 avec ressource d’authentification et jeton. Implémenté, mais vulnérable à l’attribution de rôle par le demandeur.
+
+- POST /api/auth/login
+  Contrôleur : AuthController::login.
+  Middleware : throttle:5,1 ; route publique.
+  Fonction/validation : LoginRequest valide email et mot de passe ; vérifie l’activité du compte et crée un jeton.
+  Réponse/état : JSON ; erreurs 401/403 traitées explicitement. Implémenté.
+
+- POST /api/auth/forgot-password
+  Contrôleur : AuthController::forgotPassword.
+  Middleware : throttle:3,1 ; route publique.
+  Fonction/validation : ForgotPasswordRequest valide l’email avec exists:users,email ; envoie une notification de réinitialisation.
+  Réponse/état : JSON. Implémenté, mais la validation révèle si une adresse est enregistrée.
+
+- POST /api/auth/reset-password
+  Contrôleur : AuthController::resetPassword.
+  Middleware : route publique.
+  Fonction/validation : ResetPasswordRequest valide le jeton, l’email et le nouveau mot de passe confirmé. Invalide les autres jetons Sanctum.
+  Réponse/état : JSON et erreurs de validation. Implémenté ; aucune limitation de débit visible sur cette route.
+
+- GET /api/auth/verify-email/{id}/{hash}
+  Contrôleur : AuthController::verifyEmail.
+  Middleware : signed.
+  Fonction : vérifie le lien et le hash d’email du compte.
+  Réponse/état : JSON. Implémenté, mais aucun middleware verified n’impose ensuite la vérification pour utiliser l’API.
+
+- POST /api/auth/logout
+  Contrôleur : AuthController::logout.
+  Middleware : auth:sanctum, active.
+  Fonction : révoque le jeton courant. Réponse JSON. Implémenté.
+
+- GET /api/auth/me
+  Contrôleur : AuthController::me.
+  Middleware : auth:sanctum, active.
+  Fonction : retourne le compte courant et son rôle. Réponse UserResource. Implémenté.
+
+- POST /api/auth/change-password
+  Contrôleur : AuthController::changePassword.
+  Middleware : auth:sanctum, active.
+  Validation : ChangePasswordRequest vérifie le mot de passe courant et le nouveau mot de passe confirmé.
+  Fonction : modifie le mot de passe et invalide les autres jetons. Réponse JSON. Implémenté.
+
+- POST /api/auth/profile
+  Contrôleur : AuthController::updateProfile.
+  Middleware : auth:sanctum, active.
+  Validation : UpdateProfileRequest ; avatar validé comme image avec maximum 2 Mo.
+  Fonction : met à jour le profil et stocke l’avatar sur le disque public. Réponse UserResource. Implémenté.
+
+- POST /api/auth/resend-verification
+  Contrôleur : AuthController::resendVerification.
+  Middleware : auth:sanctum, active.
+  Fonction : renvoie l’email de vérification. Réponse JSON. Implémenté, sans route de consultation des notifications.
+
+ARCHIVES PUBLIQUES
+
+- GET /api/archives
+- GET /api/archives/{archive}
+- GET /api/archives/{archive}/download
+  Contrôleur : ArchiveController::index, show, download.
+  Middleware : aucun ; routes publiques.
+  Fonction/validation : bibliothèque publique ; ListArchivesRequest valide les filtres ; show et download vérifient que l’archive est publique.
+  Données : thesis_archives, theses, versions, étudiants, encadreurs, soutenances.
+  Réponse/état : liste paginée, ressource publique ou flux de téléchargement. Partiel, fuite possible dans la recherche par mot-clé.
+
+ÉTUDIANTS
+
+- GET /api/students
+- POST /api/students
+- GET /api/students/{student}
+- PUT|PATCH /api/students/{student}
+- DELETE /api/students/{student}
+  Contrôleur : StudentController::index, store, show, update, destroy.
+  Middleware : auth:sanctum, active.
+  Rôles/policies : liste — administrateur, encadreur ou responsable de département ; création — administrateur ou permission manage-users ; détail/mise à jour — propriétaire ou administrateur ; suppression — administrateur.
+  Validation : ListStudentsRequest, StoreStudentRequest, UpdateStudentRequest.
+  Données : users, students, départements, programmes, années académiques.
+  Réponse/état : liste paginée ou StudentResource ; suppression logique du profil et désactivation du compte. Implémenté, cohérence programme/département non garantie.
+
+ENCADREURS
+
+- GET /api/supervisors/me
+- GET /api/supervisors
+- POST /api/supervisors
+- GET /api/supervisors/{supervisor}
+- PUT|PATCH /api/supervisors/{supervisor}
+- DELETE /api/supervisors/{supervisor}
+  Contrôleur : SupervisorController::me, index, store, show, update, destroy.
+  Middleware : auth:sanctum, active.
+  Rôles/policies : création — administrateur ou responsable de département ; modification — administrateur ou encadreur propriétaire ; suppression — administrateur. Consultation de liste/détail largement ouverte par la policy.
+  Validation : Form Requests du domaine Supervisor pour filtres, identité, département, capacité et activation.
+  Données : users, supervisors et mémoires affectés.
+  Réponse/état : liste paginée et SupervisorResource ; suppression refusée si des mémoires sont affectés. Partiel, données consultables par tout utilisateur authentifié.
+
+MÉMOIRES
+
+- GET /api/theses
+- POST /api/theses
+- GET /api/theses/{thesis}
+- PUT|PATCH /api/theses/{thesis}
+- DELETE /api/theses/{thesis}
+  Contrôleur : ThesisController::index, store, show, update, destroy.
+  Middleware : auth:sanctum, active.
+  Rôles/policies : création — étudiant ; détail — participant, administrateur ou responsable de département ; modification — étudiant propriétaire ou administrateur ; suppression — administrateur. viewAny autorise tout utilisateur.
+  Validation : ListThesesRequest, StoreThesisRequest, UpdateThesisRequest.
+  Données : theses, students, supervisors, departments, programs, academic_years.
+  Réponse/état : liste paginée avec données nominatives ; ThesisResource ; suppression logique et suppression des fichiers de versions. Partiel, exposition globale par la liste.
+
+- POST /api/theses/{thesis}/submit
+- POST /api/theses/{thesis}/assign-supervisor
+- POST /api/theses/{thesis}/status
+  Contrôleur : ThesisController::submit, assignSupervisor, changeStatus.
+  Middleware : auth:sanctum, active.
+  Rôles/policies : propriétaire/administrateur pour la soumission ; administrateur/responsable de département pour affectation ; administrateur, responsable de département ou encadreur affecté pour le statut.
+  Validation : AssignSupervisorRequest, ChangeStatusRequest.
+  Données : mémoire, encadreur, historique de statut, utilisateur.
+  Réponse/état : ThesisResource ; transitions limitées par le service ; exceptions de transition non converties explicitement en 422. Partiel.
+
+VERSIONS DE MÉMOIRES
+
+- GET /api/theses/{thesis}/versions
+- POST /api/theses/{thesis}/versions
+- GET /api/theses/{thesis}/versions/{version}/download
+  Contrôleur : ThesisVersionController::index, store, download.
+  Middleware : auth:sanctum, active.
+  Rôles/policies : lecture/téléchargement selon l’accès au mémoire ; dépôt par l’étudiant propriétaire.
+  Validation : UploadVersionRequest — PDF/DOCX/ZIP, maximum 20 Mo.
+  Données : thesis_versions ; stockage local privé.
+  Réponse/état : liste JSON, 201 ou flux de téléchargement. Implémenté ; dépôt permis quel que soit le statut et stockage non transactionnel.
+
+COMMENTAIRES
+
+- GET /api/theses/{thesis}/comments
+- POST /api/theses/{thesis}/comments
+  Contrôleur : ThesisCommentController::index, store.
+  Middleware : auth:sanctum, active.
+  Rôles/policies : participants ou rôles privilégiés.
+  Validation : StoreCommentRequest valide contenu et version optionnelle.
+  Données : comments, thesis_versions, users.
+  Réponse/état : commentaires JSON et notification aux participants. Le lien thesis_version_id n’est pas limité à une version de ce mémoire. Partiel.
+
+SOUTENANCES
+
+- GET /api/defense-schedules/calendar
+- GET /api/defense-schedules/mine
+- POST /api/defense-schedules
+- GET /api/defense-schedules/{defense_schedule}
+- PUT /api/defense-schedules/{defense_schedule}
+- POST /api/defense-schedules/{defense_schedule}/assign-jury
+- POST /api/defense-schedules/{defense_schedule}/cancel
+- POST /api/defense-schedules/{defense_schedule}/result
+- GET /api/defense-schedules/{defense_schedule}/report
+  Contrôleur : DefenseScheduleController::calendar, mine, store, show, update, assignJury, cancel, recordResult, generateReport.
+  Middleware : auth:sanctum, active.
+  Rôles/policies : création, modification, jury, annulation et résultat selon rôle administrateur/responsable de département ; calendrier, détail et rapport autorisés par des méthodes de policy permissives.
+  Validation : Form Requests du domaine Defense pour dates, salle, mémoire, durée, jury, motif, verdict et note.
+  Données : defense_schedules, defense_rooms, defense_jury_members, defense_results.
+  Réponse/état : JSON, notifications ou PDF. Partiel ; lectures trop larges, calendrier non paginé, contrôle de conflit utilisant SQL DATE_ADD.
+
+ÉVALUATIONS DU JURY
+
+- GET /api/defense-schedules/{defense_schedule}/evaluations
+- POST /api/defense-schedules/{defense_schedule}/evaluations
+  Contrôleur : DefenseJuryEvaluationController::index, store.
+  Middleware : auth:sanctum, active.
+  Rôles/policies : évaluation par un juré affecté ; lecture par jury affecté ou rôles privilégiés.
+  Validation : StoreJuryEvaluationRequest valide note, verdict et remarques.
+  Données : defense_jury_evaluations, defense_schedules, jury_members.
+  Réponse/état : 201 et ressource d’évaluation. Mise à jour d’une évaluation existante possible ; évaluations non agrégées automatiquement en décision finale.
+
+LOOKUPS
+
+- GET /api/lookups/departments
+- GET /api/lookups/programs
+- GET /api/lookups/academic-years
+- GET /api/lookups/defense-rooms
+- GET /api/lookups/jury-members
+- GET /api/lookups/supervisors
+  Contrôleur : LookupController, méthode correspondant à la ressource.
+  Middleware : auth:sanctum, active ; aucune permission métier supplémentaire.
+  Fonction/données : lecture de tables de référence ; filtres département optionnels pour programmes, jurés et encadreurs.
+  Réponse/état : collections JSON non paginées. Implémenté.
+
+ADMINISTRATION DES DÉPARTEMENTS
+
+- GET /api/admin/departments
+- POST /api/admin/departments
+- GET /api/admin/departments/{department}
+- PUT|PATCH /api/admin/departments/{department}
+- DELETE /api/admin/departments/{department}
+  Contrôleur : DepartmentController::index, store, show, update, destroy.
+  Middleware : auth:sanctum, active.
+  Rôles/policies : création/modification via requêtes administrateur ; suppression par policy administrateur ; liste/détail plus largement accessibles.
+  Validation : StoreDepartmentRequest, UpdateDepartmentRequest.
+  Données : departments, programs, students, users.
+  Réponse/état : JSON paginé ou DepartmentDetailResource ; contrôles de suppression incomplets au regard des références possibles. Partiel.
+
+ADMINISTRATION DES PROGRAMMES
+
+- GET /api/admin/programs
+- POST /api/admin/programs
+- PUT|PATCH /api/admin/programs/{program}
+- DELETE /api/admin/programs/{program}
+  Contrôleur : ProgramController::index, store, update, destroy.
+  Middleware : auth:sanctum, active.
+  Rôles : écriture contrôlée par requête ; suppression explicitement limitée à l’administrateur ; lecture accessible à tout utilisateur authentifié.
+  Validation : StoreProgramRequest, UpdateProgramRequest.
+  Données : programs, departments, students.
+  Réponse/état : JSON paginé. La suppression ne vérifie que les étudiants, pas toutes les références potentielles. Partiel. Aucun endpoint show.
+
+ANNÉES ACADÉMIQUES
+
+- GET /api/admin/academic-years
+- POST /api/admin/academic-years
+- PUT|PATCH /api/admin/academic-years/{academic_year}
+- DELETE /api/admin/academic-years/{academic_year}
+  Contrôleur : AcademicYearController::index, store, update, destroy.
+  Middleware : auth:sanctum, active.
+  Rôles : création/modification limitées par Form Request à l’administrateur ; index sans contrôle de rôle ; destroy sans contrôle de rôle.
+  Validation : StoreAcademicYearRequest, UpdateAcademicYearRequest.
+  Données : academic_years, students.
+  Réponse/état : JSON ; transaction pour maintenir l’année courante. Partiel, défaut d’autorisation sur suppression.
+
+COMPTES UTILISATEURS
+
+- GET /api/admin/users
+- POST /api/admin/users/{user}/toggle-active
+  Contrôleur : UserManagementController::index, toggleActive.
+  Middleware : auth:sanctum, active ; contrôle interne du rôle administrateur.
+  Validation : filtres de recherche, rôle et activation, sans Form Request ni borne explicite de pagination.
+  Données : users, roles.
+  Réponse/état : liste paginée ou activation/désactivation ; l’administrateur ne peut pas désactiver son propre compte. Implémenté.
+
+ADMINISTRATION DES ARCHIVES
+
+- GET /api/admin/theses/{thesis}/archive-eligibility
+- POST /api/admin/theses/{thesis}/archive
+- GET /api/admin/archives
+- GET /api/admin/archives/{archive}
+- PUT /api/admin/archives/{archive}
+- GET /api/admin/archives/{archive}/download
+- DELETE /api/admin/archives/{archive}
+  Contrôleur : ThesisArchiveController::eligibility, store, index, show, update, download, destroy.
+  Middleware : auth:sanctum, active ; rôle administrator ou head-of-department, sauf suppression réservée à administrator.
+  Validation : ArchiveThesisRequest, UpdateArchiveRequest, ListArchivesRequest.
+  Données : thesis_archives, theses, versions, soutenances, audit_logs.
+  Réponse/état : JSON paginé, données administratives ou téléchargement privé. Contrôle d’éligibilité présent, mais version fournie non liée au mémoire. Partiel.
+
+======================================================================
+D. INVENTAIRE DES FONCTIONNALITÉS MÉTIER
+======================================================================
+
+- Authentification, comptes et mots de passe — PARTIELLE.
+  AuthController, AuthService, Form Requests d’authentification, jetons Sanctum. Rôle choisi à l’inscription publique ; email vérifié non requis pour les routes protégées ; adresse existante révélée par validation de réinitialisation.
+
+- Rôles et permissions — PARTIELLE.
+  Role, Permission, RoleSeeder, PermissionSeeder, middleware de rôle et permission. Application hétérogène ; les policies et rôles en dur dominent ; middleware permission n’appliqué à aucun groupe de routes métier.
+
+- Étudiants, promotions et années — PARTIELLE.
+  StudentService, Student, AcademicYearController. L’année représente le rattachement temporel ; aucun modèle distinct de promotion. Cohérence programme/département/année non vérifiée partout.
+
+- Définition et attribution des mémoires — PARTIELLE.
+  ThesisController, ThesisService et affectation d’encadreur. hasCapacity existe, mais l’affectation ne l’utilise pas. Contrôle départemental et activation de l’encadreur incomplets.
+
+- Dépôt et versions — IMPLÉMENTÉE, AVEC LIMITES.
+  ThesisVersionController, versionnage numérique, dépôt PDF/DOCX/ZIP. Aucun contrôle de statut avant dépôt, aucune limite de nombre de versions ; une transaction DB ne restaure pas les fichiers en cas d’échec.
+
+- Corrections, commentaires et historique — PARTIELLE.
+  ThesisCommentController, événements et notifications ; ThesisStatusHistory. Référence de version d’un commentaire non vérifiée contre le mémoire ; archivage sans entrée d’historique de statut.
+
+- Cycle de vie du mémoire — PARTIELLE.
+  Statuts et transitions dans Thesis et ThesisService. Transitions approuvé/archivé divergentes du chemin d’archivage ; exceptions de transition non converties explicitement en réponse HTTP 422.
+
+- Planification des soutenances — PARTIELLE.
+  DefenseScheduleService, contrôleur, salles et conflits de calendrier. Une seule soutenance par mémoire selon le schéma ; contrôles de conflit soumis à des courses concurrentes et à une dépendance au moteur SQL ; aucune validation du statut d’éligibilité du mémoire.
+
+- Salles et disponibilités — PARTIELLE.
+  Modèle DefenseRoom, migration et endpoint de lookup ; contrôle de collision. Aucun contrôleur CRUD de salles ; calendrier et lookups non paginés.
+
+- Jury, évaluations et décision finale — PARTIELLE.
+  Affectation de trois rôles, évaluations individuelles et résultat final. Pas de CRUD des jurés ; statut actif non vérifié lors de l’affectation ; évaluations non agrégées ; résultat remplaçable sans historique.
+
+- Archivage et bibliothèque publique — PARTIELLE.
+  ThesisArchiveService, ressources publique et admin, téléchargements. Recherche publique susceptible d’inclure des archives privées ; version d’archive non vérifiée comme appartenant au mémoire ; données nominatives exposées par la ressource publique.
+
+- Recherche et filtres — PARTIELLE.
+  Filtres pour mémoires, étudiants, archives, soutenances et utilisateurs. Périmètre parfois global ; filtres sans validation dédiée ou sans limite de pagination ; recherches LIKE contenant des jokers potentiellement coûteuses.
+
+- Notifications et rappels — PARTIELLE.
+  Événements/listeners de dépôt, statut et commentaires ; notifications mail et base de données ; notifications de soutenance. Aucune migration notifications identifiée, aucun endpoint de consultation, aucun rappel planifié ou job métier récurrent identifié.
+
+- Tableaux de bord et statistiques — ABSENTS dans le code examiné.
+  Aucun contrôleur ou endpoint dédié identifié.
+
+- Exports PDF/Excel — PARTIELLE.
+  Rapport PDF de soutenance via DomPDF et resources/views/reports/defense-report.blade.php. Aucun export Excel identifié ; PDF avec informations personnelles et résultat accessible par une policy permissive.
+
+- Journal d’audit et historique — PARTIELLE.
+  Table audit_logs, modèle AuditLog, AuditLogger. Appels identifiés principalement pour opérations sur les archives ; aucune route de consultation ; autres actions non systématiquement journalisées.
+
+- Administration des paramètres — PARTIELLE.
+  Départements, programmes, années et comptes. Aucun CRUD repéré pour salles, jurés, rôles, permissions ou paramètres généraux.
+
+- Fonctions simulées/mocks — AUCUNE simulation métier repérée.
+  Factories Faker et seeders de démonstration existent ; ils ne constituent pas une implémentation opérationnelle ni un mock d’API.
+
+======================================================================
+E. SCHÉMA DES DONNÉES
+======================================================================
+
+Le tableau suivant décrit le schéma attendu par les migrations, pas l’état d’une base réellement consultée.
+
+- Identité : roles, permissions, permission_role, users.
+  Un utilisateur appartient à un rôle ; association rôle-permission unique par paire ; suppression du rôle d’un utilisateur restreinte ; utilisateur avec suppression logique et email unique.
+
+- Authentification : personal_access_tokens, password_reset_tokens.
+  Jetons polymorphes Sanctum et table de jetons de réinitialisation de mot de passe.
+
+- Organisation : departments, programs, academic_years, students, supervisors.
+  Code département/programme unique ; programme lié à un département ; étudiants liés à année, programme et département ; numéro étudiant unique ; profils étudiant/encadreur liés chacun à un utilisateur unique et supprimés logiquement.
+
+- Mémoires : theses, thesis_versions, comments, thesis_status_histories.
+  Un mémoire par étudiant (student_id unique) ; versions uniques par numéro pour chaque mémoire ; commentaires liés au mémoire et éventuellement à une version ; historique des statuts avec utilisateur auteur. Mémoire supprimé logiquement.
+
+- Soutenances : defense_rooms, jury_members, defense_schedules, defense_jury_members, defense_jury_evaluations, defense_results.
+  Une soutenance par mémoire (thesis_id unique) ; rôles de jurés uniques par soutenance ; évaluation unique par couple soutenance/juré ; un résultat unique par soutenance.
+
+- Archives : thesis_archives.
+  Une archive par mémoire ; référence à une version et éventuellement à une soutenance ; visibilité publique/privée, mots-clés JSON, option de publication de la note.
+
+- Audit et infrastructure : audit_logs ; migrations de cache et de jobs. Aucune migration dédiée à la table Laravel notifications n’a été trouvée.
+
+Points d’intégrité :
+
+- La validation de program_id et department_id vérifie leur existence, pas leur cohérence entre eux.
+- Les contrôles applicatifs de suppression de programmes, années ou départements ne couvrent pas toujours toutes les références imposées par les clés étrangères. Une suppression peut donc échouer au niveau DB.
+- La relation entre thesis_archives.thesis_version_id et le mémoire de l’archive n’est pas une contrainte du schéma et n’est pas vérifiée par le service.
+- Les suppressions logiques ne déclenchent pas les cascades SQL prévues pour les suppressions physiques.
+- La migration 2024_01_06_144440_create_defense_jury_evaluations_table.php précède, par son nom, les migrations 2026 des tables defense_schedules et jury_members qu’elle référence. Sur un moteur qui exige les tables référencées à la création de la contrainte, l’ordre peut faire échouer la migration.
+- Le schéma réel, les migrations appliquées, les données présentes et les éventuelles tables ajoutées hors migrations n’ont pas été vérifiés.
+
+======================================================================
+F. AUTHENTIFICATION ET AUTORISATIONS
+======================================================================
+
+Mécanismes présents :
+
+- Les routes métier utilisent principalement auth:sanctum et le middleware active.
+- Les jetons sont créés à la connexion, révoqués à la déconnexion et régénérés après réinitialisation ; une nouvelle connexion supprime les jetons précédents du compte.
+- config/sanctum.php définit une expiration à 43 200 minutes ; la configuration effective au runtime n’a pas été vérifiée.
+- Les mots de passe sont hachés par Laravel et soumis à des règles minimales de complexité.
+- Les alias role, permission et active sont définis dans bootstrap/app.php. Les policies sont enregistrées dans AuthServiceProvider.php.
+
+Lacunes et risques :
+
+1. CRITIQUE — élévation de privilèges à l’inscription. Le rôle est contrôlé uniquement par l’existence de son ID, pas par une règle limitant le rôle sélectionnable.
+2. Accès transversal aux mémoires. ThesisPolicy::viewAny retourne true et ThesisController::index ne filtre pas selon le rôle ou la participation. Les filtres student_id et supervisor_id ne remplacent pas un contrôle d’accès. La ressource retourne notamment nom complet, numéro étudiant, résumé et statut.
+3. Accès transversal aux informations de soutenance. DefenseSchedulePolicy::view et generateReport retournent true ; le calendrier est également autorisé sans contrôle de rôle. Le PDF expose identité de l’étudiant, jury et, si disponible, résultat et remarques.
+4. Profils encadreur consultables largement. viewAny et view de SupervisorPolicy autorisent toute consultation ; les ressources incluent email et téléphone.
+5. Autorisations administratives incomplètes. DELETE /api/admin/academic-years/{academic_year} n’est pas accompagnée d’un Form Request ni d’un appel à une policy administrateur. Accessible à tout compte actif authentifié, sous réserve du contrôle de dépendance.
+6. Archives privées révélées par recherche. Le orWhereJsonContains de ThesisArchiveService::query peut contourner le filtre visibility=public dans la liste publique.
+7. Données personnelles publiques. Une archive publique expose par conception les noms de l’étudiant, de l’encadreur et des jurés, ainsi que résumé et informations de soutenance ; la note dépend de show_final_grade.
+8. La vérification d’email existe, mais aucune protection verified n’est appliquée aux groupes de routes.
+9. Fuite d’existence de comptes. La validation d’email et les réponses de réinitialisation distinguent adresse existante et absente ; la route forgot-password est limitée à trois requêtes par minute.
+10. Plusieurs liens entre identifiants existants ne sont pas vérifiés métier : version du commentaire/mémoire, programme/département, version archivée/mémoire.
+11. bootstrap/app.php renvoie des formats JSON dédiés pour validation, authentification, autorisation et modèle introuvable. En production non-debug, les autres exceptions deviennent un 500 générique. Les exceptions métier qui posent simplement leur code PHP à 422 ne sont pas converties explicitement en réponse HTTP 422.
+
+======================================================================
+G. WORKFLOW DES MÉMOIRES ET SOUTENANCES
+======================================================================
+
+Transitions définies dans le code actuel par ThesisService :
+
+- draft -> submitted
+- submitted -> under_review
+- under_review -> revision_required, approved ou rejected
+- revision_required -> submitted
+- approved -> aucune transition dans l’état actuel du fichier modifié
+- rejected -> aucune transition
+- archived -> aucune transition
+
+Le dépôt d’une première version ne soumet pas automatiquement le mémoire. La soumission exige au moins une version et crée un historique. L’affectation d’encadreur est une action distincte. Le changement de statut crée un historique et déclenche une notification.
+
+Soutenances et archivage :
+
+1. Une soutenance peut être créée pour un mémoire et une salle ; le schéma ne permet qu’une soutenance par mémoire.
+2. Le jury est affecté avec un président, un examinateur et un rapporteur ; les collisions de disponibilité et l’affectation du directeur comme juré sont contrôlées partiellement.
+3. Chaque juré affecté peut soumettre ou remplacer son évaluation.
+4. Un résultat final est enregistré séparément et fait passer la soutenance à completed. Il n’est pas calculé à partir des évaluations individuelles.
+5. L’archivage vérifie que le mémoire est approuvé, qu’une version PDF existe, que la soutenance est terminée et que le verdict n’est pas fail.
+6. L’archivage crée l’enregistrement d’archive puis modifie directement le statut du mémoire en archived. Ce changement direct n’ajoute pas d’entrée à thesis_status_histories.
+
+Aucun contrôle explicite n’impose le statut du mémoire avant la planification d’une soutenance. Le statut postponed est prévu par le schéma et les filtres, mais aucun chemin de transition correspondant n’a été identifié. Ces transitions décrivent le code ; elles ne prouvent pas les transitions actuellement enregistrées en base.
+
+======================================================================
+H. FICHIERS ET TRAITEMENTS DES DOCUMENTS
+======================================================================
+
+- Les versions de mémoire sont placées sur le disque local, dont la racine configurée est storage/app/private dans config/filesystems.php. Elles ne sont pas destinées à une exposition statique publique.
+- Les dépôts acceptent PDF, DOCX et ZIP, avec une limite de 20 Mo dans le Form Request et dans le service. Aucun contrôle antivirus ou analyse du contenu n’a été trouvé.
+- Le chemin de stockage est généré côté serveur. Le nom original et le type MIME sont conservés comme métadonnées et le téléchargement passe par un endpoint autorisé.
+- Le téléchargement d’une version vérifie que cette version appartient bien au mémoire passé dans l’URI.
+- Le téléchargement d’une archive publique vérifie la visibilité, mais dépend de la version référencée dans l’archive ; l’appartenance et le type de cette version ne sont pas revalidés.
+- Le service d’archivage peut accepter un thesis_version_id d’un autre mémoire ou non-PDF. Cela peut conduire à exposer le mauvais document par le téléchargement d’archive.
+- Les écritures de fichiers effectuées pendant une transaction DB ne sont pas annulées automatiquement par un rollback. Inversement, la suppression d’un fichier dans une transaction ne restaure pas le document si la suppression DB échoue.
+- Les avatars sont enregistrés sur le disque public après validation d’image, avec une limite de 2 Mo ; l’ancien fichier est supprimé avant le nouvel enregistrement du profil, sans transaction commune fichier/base.
+
+======================================================================
+I. QUALITÉ TECHNIQUE ET TESTS
+======================================================================
+
+- Tests : seuls tests/Unit/ExampleTest.php et tests/Feature/ExampleTest.php ont été identifiés ; ils testent respectivement une assertion triviale et la page d’accueil. Aucun test métier, d’autorisation, d’upload, de transition ou d’archivage n’a été trouvé. Les tests n’ont pas été exécutés.
+- Transactions : présentes pour l’inscription, plusieurs opérations étudiant/encadreur, changements de statut, création de soutenance, affectation du jury et archivage. Elles ne couvrent pas les effets de stockage fichier.
+- Courses concurrentes : les contrôles de disponibilité de salle et de jury précèdent certaines transactions d’écriture ; deux requêtes concurrentes peuvent passer le contrôle avant de créer leurs créneaux. Les contraintes d’unicité DB ne remplacent pas ces contrôles.
+- Compatibilité SQL : le contrôle de chevauchement utilise DATE_ADD(... INTERVAL ... MINUTE), syntaxe dépendante du moteur. Le fichier PHPUnit déclare SQLite en mémoire ; cette requête n’est pas portable telle quelle vers SQLite.
+- Pagination et performance : les listes de soutenances mine et calendrier, les versions, commentaires, évaluations et plusieurs lookups sont chargés sans pagination. Les recherches %terme% et plusieurs relations peuvent provoquer des scans coûteux.
+- Historique : les changements de statut usuels sont historisés ; l’archivage direct, les révisions d’évaluations et les remplacements de résultats ne conservent pas un historique complet.
+- Notifications : les listeners de commentaires, soumission et changement de statut implémentent ShouldQueue ; certaines notifications utilisent le canal database, mais aucune migration de table notifications n’a été trouvée. Délivrabilité mail, worker de queue et schéma de notification non testés.
+- Marqueurs de simulation : les appels Faker identifiés appartiennent aux factories ; aucun mock de route ou stub métier explicite n’a été identifié.
+- Migration et commandes : aucune migration n’a été lancée. php artisan route:list --json a été tenté sans modification attendue des données, mais la commande est restée sans sortie pendant le délai d’attente et a été arrêtée.
+
+======================================================================
+J. CORRESPONDANCE AVEC ANGULAR
+======================================================================
+
+La comparaison est à effectuer : le workspace analysé contient le backend Laravel et les fichiers JavaScript de scaffolding Vite, mais aucun fichier TypeScript Angular, service HTTP, composant ou environnement Angular n’a été trouvé.
+
+Il n’est donc pas possible d’identifier de façon fiable :
+
+- les routes réellement appelées par Angular ;
+- les routes non utilisées ;
+- les incohérences entre DTO Angular et ressources Laravel ;
+- les différences de statuts, filtres ou formats de réponse entre les deux couches.
+
+Aucune conclusion sur la compatibilité frontend/backend ne peut être tirée du seul code Laravel.
+
+======================================================================
+K. SYNTHÈSE DES FONCTIONNALITÉS
+======================================================================
+
+IMPLÉMENTÉES SELON LE CODE
+- Authentification Sanctum, gestion du profil, changements de mot de passe.
+- CRUD de base étudiants, encadreurs et mémoires.
+- Versions de fichiers, commentaires, transitions usuelles de statut.
+- Planification de soutenance, affectation du jury, évaluations et résultat final.
+- Archivage, catalogue public, rapport PDF et notifications email déclarées.
+
+PARTIELLES
+- Gestion des rôles/permissions, sécurité des listes, cohérence des relations, historique.
+- Contraintes d’archivage, gestion des erreurs métier, disponibilité concurrente.
+- Notifications en base, audit, administration et téléchargement d’archives.
+
+SIMULÉES
+- Aucune fonctionnalité métier simulée identifiée.
+- Des factories Faker et seeders de démonstration existent, mais ne remplacent pas les parcours réels.
+
+ABSENTES DANS LE CODE EXAMINÉ
+- API Angular accessible dans le workspace.
+- Tableaux de bord/statistiques, export Excel.
+- Gestion CRUD des salles et des jurés.
+- API de consultation des notifications, endpoint d’audit, rappels planifiés.
+- Entité distincte de promotion.
+
+À VÉRIFIER HORS ANALYSE STATIQUE
+- Structure et contenu de la base réelle, migrations déjà appliquées.
+- Fonctionnement réel des mails et queues, configuration d’exécution.
+- Exposition effective des fichiers publics, compatibilité des requêtes avec le moteur DB.
+- Intégration Angular dans un autre dépôt.
+
+======================================================================
+L. LIMITES DE L’AUDIT
+======================================================================
+
+- L’analyse porte sur le code, les routes, migrations, modèles, validations, policies, contrôleurs, services, ressources, notifications, configuration applicative non sensible et tests disponibles dans le dépôt.
+- La base réelle n’a pas été consultée : aucune affirmation n’est faite sur son schéma effectivement installé, ses migrations appliquées ou ses données.
+- Les tests n’ont pas été exécutés ; aucune migration ni commande modifiant une base ou des fichiers métier n’a été lancée.
+- php artisan route:list --json a été interrompu après attente sans résultat ; les routes ont été reconstituées depuis les déclarations source, notamment l’expansion des apiResource.
+- Le contenu du fichier .env n’a pas été lu ni reproduit.
+- Aucun service externe, stockage distant, serveur mail ou worker de queue n’a été contacté.
+- Le frontend Angular n’étant pas présent dans l’espace de travail, la comparaison avec ses appels reste non confirmée.
+- Les deux modifications préexistantes de ThesisController.php et ThesisService.php ont été conservées et prises en compte telles qu’observées.
+
+FIN DU RAPPORT

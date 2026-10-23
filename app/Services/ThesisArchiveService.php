@@ -9,11 +9,18 @@ use App\Models\Thesis;
 use App\Models\ThesisArchive;
 use App\Models\User;
 use App\Services\Interfaces\ThesisArchiveServiceInterface;
+use App\Services\Interfaces\ThesisServiceInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 
 class ThesisArchiveService implements ThesisArchiveServiceInterface
 {
+    public function __construct(protected ThesisServiceInterface $thesisService)
+    {
+    }
+
     public function checkEligibility(Thesis $thesis): array
     {
         $reasons = [];
@@ -52,21 +59,36 @@ class ThesisArchiveService implements ThesisArchiveServiceInterface
 
     public function archive(Thesis $thesis, array $data, User $actor): ThesisArchive
     {
-        $reasons = $this->checkEligibility($thesis);
-
-        if (!empty($reasons)) {
-            throw new ThesisNotEligibleForArchivingException($reasons);
-        }
+        Gate::forUser($actor)->authorize('archive', [ThesisArchive::class, $thesis]);
 
         return DB::transaction(function () use ($thesis, $data, $actor) {
+            $thesis = Thesis::query()->lockForUpdate()->findOrFail($thesis->id);
+            $reasons = $this->checkEligibility($thesis);
+
+            if (!empty($reasons)) {
+                throw new ThesisNotEligibleForArchivingException($reasons);
+            }
+
             $finalVersion = $thesis->versions()->where('mime_type', 'application/pdf')->first();
+            $versionId = $data['thesis_version_id'] ?? $finalVersion?->id;
+            $finalVersion = $thesis->versions()
+                ->whereKey($versionId)
+                ->where('mime_type', 'application/pdf')
+                ->first();
+
+            if (!$finalVersion) {
+                throw ValidationException::withMessages([
+                    'thesis_version_id' => ['The selected version must be a PDF belonging to this thesis.'],
+                ]);
+            }
+
             $defenseSchedule = DefenseSchedule::where('thesis_id', $thesis->id)
                 ->where('status', DefenseSchedule::STATUS_COMPLETED)
                 ->first();
 
             $archive = ThesisArchive::create([
                 'thesis_id' => $thesis->id,
-                'thesis_version_id' => $data['thesis_version_id'] ?? $finalVersion->id,
+                'thesis_version_id' => $finalVersion->id,
                 'defense_schedule_id' => $defenseSchedule?->id,
                 'keywords' => $data['keywords'] ?? [],
                 'visibility' => $data['visibility'] ?? ThesisArchive::VISIBILITY_PRIVATE,
@@ -75,7 +97,7 @@ class ThesisArchiveService implements ThesisArchiveServiceInterface
                 'archived_at' => now(),
             ]);
 
-            $thesis->update(['status' => Thesis::STATUS_ARCHIVED]);
+            $this->thesisService->archiveStatus($thesis, $actor, 'Thesis archived.');
 
             AuditLogger::log(
                 action: 'thesis_archived',
@@ -91,24 +113,27 @@ class ThesisArchiveService implements ThesisArchiveServiceInterface
 
     public function update(ThesisArchive $archive, array $data, User $actor): ThesisArchive
     {
-        $oldValues = $archive->only(['visibility', 'show_final_grade', 'keywords']);
+        return DB::transaction(function () use ($archive, $data, $actor) {
+            $archive = ThesisArchive::query()->lockForUpdate()->findOrFail($archive->id);
+            $oldValues = $archive->only(['visibility', 'show_final_grade', 'keywords']);
 
-        $archive->update(array_filter([
-            'keywords' => $data['keywords'] ?? null,
-            'visibility' => $data['visibility'] ?? null,
-            'show_final_grade' => $data['show_final_grade'] ?? null,
-        ], fn ($v) => $v !== null));
+            $archive->update(array_filter([
+                'keywords' => $data['keywords'] ?? null,
+                'visibility' => $data['visibility'] ?? null,
+                'show_final_grade' => $data['show_final_grade'] ?? null,
+            ], fn ($v) => $v !== null));
 
-        AuditLogger::log(
-            action: 'thesis_archive_updated',
-            modelClass: ThesisArchive::class,
-            modelId: $archive->id,
-            oldValues: $oldValues,
-            newValues: $archive->only(['visibility', 'show_final_grade', 'keywords']),
-            user: $actor
-        );
+            AuditLogger::log(
+                action: 'thesis_archive_updated',
+                modelClass: ThesisArchive::class,
+                modelId: $archive->id,
+                oldValues: $oldValues,
+                newValues: $archive->only(['visibility', 'show_final_grade', 'keywords']),
+                user: $actor
+            );
 
-        return $archive->fresh(['thesis.student.user', 'thesis.supervisor.user', 'finalVersion', 'defenseSchedule.juryMembers.user']);
+            return $archive->fresh(['thesis.student.user', 'thesis.supervisor.user', 'finalVersion', 'defenseSchedule.juryMembers.user']);
+        });
     }
 
     public function delete(ThesisArchive $archive, User $actor): void
@@ -135,7 +160,14 @@ class ThesisArchiveService implements ThesisArchiveServiceInterface
 
     public function listAdmin(array $filters): LengthAwarePaginator
     {
-        return $this->query($filters)->paginate($filters['per_page'] ?? 20);
+        $query = $this->query($filters);
+
+        if (($filters['_viewer_role'] ?? null) === 'head-of-department') {
+            $query->whereHas('thesis.department', fn ($departmentQuery) => $departmentQuery
+                ->where('head_of_department_id', $filters['_viewer_id'] ?? 0));
+        }
+
+        return $query->paginate($filters['per_page'] ?? 20);
     }
 
     private function query(array $filters)
@@ -156,17 +188,19 @@ class ThesisArchiveService implements ThesisArchiveServiceInterface
 
         if (!empty($filters['search'])) {
             $search = $filters['search'];
-            $query->whereHas('thesis', function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                    ->orWhereHas('student.user', function ($uq) use ($search) {
-                        $uq->where('first_name', 'like', "%{$search}%")
-                            ->orWhere('last_name', 'like', "%{$search}%");
-                    })
-                    ->orWhereHas('supervisor.user', function ($uq) use ($search) {
-                        $uq->where('first_name', 'like', "%{$search}%")
-                            ->orWhere('last_name', 'like', "%{$search}%");
-                    });
-            })->orWhereJsonContains('keywords', $search);
+            $query->where(function ($searchQuery) use ($search) {
+                $searchQuery->whereHas('thesis', function ($q) use ($search) {
+                    $q->where('title', 'like', "%{$search}%")
+                        ->orWhereHas('student.user', function ($uq) use ($search) {
+                            $uq->where('first_name', 'like', "%{$search}%")
+                                ->orWhere('last_name', 'like', "%{$search}%");
+                        })
+                        ->orWhereHas('supervisor.user', function ($uq) use ($search) {
+                            $uq->where('first_name', 'like', "%{$search}%")
+                                ->orWhere('last_name', 'like', "%{$search}%");
+                        });
+                })->orWhereJsonContains('keywords', $search);
+            });
         }
 
         if (!empty($filters['academic_year_id'])) {

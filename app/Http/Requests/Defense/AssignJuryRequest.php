@@ -15,8 +15,8 @@ class AssignJuryRequest extends FormRequest
     {
         return [
             'jury' => ['required', 'array', 'size:3'],
-            'jury.*.jury_member_id' => ['required', 'exists:jury_members,id'],
-            'jury.*.role' => ['required', 'in:president,examiner,reporter'],
+            'jury.*.jury_member_id' => ['required', 'distinct', 'exists:jury_members,id'],
+            'jury.*.role' => ['required', 'distinct', 'in:president,examiner,reporter'],
         ];
     }
 }

@@ -14,7 +14,7 @@ class ChangeStatusRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => ['required', 'in:submitted,under_review,revision_required,approved,rejected,archived'],
+            'status' => ['required', 'in:submitted,under_review,revision_required,approved,rejected'],
             'remarks' => ['nullable', 'string', 'max:2000'],
         ];
     }

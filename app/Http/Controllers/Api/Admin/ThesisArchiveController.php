@@ -25,8 +25,11 @@ class ThesisArchiveController extends Controller
     public function index(ListArchivesRequest $request): JsonResponse
     {
         $this->authorize('viewAny', ThesisArchive::class);
+        $filters = $request->validated();
+        $filters['_viewer_role'] = $request->user()->role?->slug;
+        $filters['_viewer_id'] = $request->user()->id;
 
-        $archives = $this->archiveService->listAdmin($request->validated());
+        $archives = $this->archiveService->listAdmin($filters);
 
         return response()->json([
             'data' => ThesisArchiveAdminResource::collection($archives->items()),
@@ -41,6 +44,8 @@ class ThesisArchiveController extends Controller
 
     public function eligibility(Thesis $thesis): JsonResponse
     {
+        $this->authorize('archive', [ThesisArchive::class, $thesis]);
+
         $reasons = $this->archiveService->checkEligibility($thesis);
 
         return response()->json([

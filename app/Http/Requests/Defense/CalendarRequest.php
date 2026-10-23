@@ -8,7 +8,7 @@ class CalendarRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        return $this->user()->can('viewAny', \App\Models\DefenseSchedule::class);
     }
 
     public function rules(): array

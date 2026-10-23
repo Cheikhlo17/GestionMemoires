@@ -16,6 +16,15 @@ class StudentRepository implements StudentRepositoryInterface
     {
         $query = $this->model->with(['user', 'department', 'program', 'academicYear']);
 
+        $viewerRole = $filters['_viewer_role'] ?? null;
+        $viewerId = $filters['_viewer_id'] ?? null;
+
+        if ($viewerRole === 'head-of-department') {
+            $query->whereHas('department', fn ($q) => $q->where('head_of_department_id', $viewerId));
+        } elseif ($viewerRole === 'supervisor') {
+            $query->whereHas('theses.supervisor', fn ($q) => $q->where('user_id', $viewerId));
+        }
+
         if (!empty($filters['search'])) {
             $search = $filters['search'];
             $query->where(function ($q) use ($search) {

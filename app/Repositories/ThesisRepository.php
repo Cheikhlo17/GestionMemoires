@@ -22,6 +22,17 @@ class ThesisRepository implements ThesisRepositoryInterface
             'academicYear',
         ]);
 
+        $viewerRole = $filters['_viewer_role'] ?? null;
+        $viewerId = $filters['_viewer_id'] ?? null;
+
+        if ($viewerRole === 'student') {
+            $query->whereHas('student', fn ($q) => $q->where('user_id', $viewerId));
+        } elseif ($viewerRole === 'supervisor') {
+            $query->whereHas('supervisor', fn ($q) => $q->where('user_id', $viewerId));
+        } elseif ($viewerRole === 'head-of-department') {
+            $query->whereHas('department', fn ($q) => $q->where('head_of_department_id', $viewerId));
+        }
+
         if (!empty($filters['search'])) {
             $search = $filters['search'];
             $query->where(function ($q) use ($search) {

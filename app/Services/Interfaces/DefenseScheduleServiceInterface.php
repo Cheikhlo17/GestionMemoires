@@ -17,7 +17,7 @@ interface DefenseScheduleServiceInterface
 
     public function reschedule(DefenseSchedule $schedule, array $data, User $actor): DefenseSchedule;
 
-    public function assignJury(DefenseSchedule $schedule, array $juryAssignments): DefenseSchedule;
+    public function assignJury(DefenseSchedule $schedule, array $juryAssignments, User $actor): DefenseSchedule;
 
     public function cancel(DefenseSchedule $schedule, string $reason, User $actor): DefenseSchedule;
 

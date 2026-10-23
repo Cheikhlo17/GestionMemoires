@@ -25,4 +25,9 @@ class AcademicYear extends Model
     {
         return $this->hasMany(Student::class);
     }
+
+    public function theses(): HasMany
+    {
+        return $this->hasMany(Thesis::class);
+    }
 }

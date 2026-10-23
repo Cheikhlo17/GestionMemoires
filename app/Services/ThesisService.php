@@ -10,14 +10,19 @@ use App\Models\Comment;
 use App\Models\Thesis;
 use App\Models\ThesisStatusHistory;
 use App\Models\ThesisVersion;
+use App\Models\Supervisor;
 use App\Models\User;
 use App\Repositories\Interfaces\ThesisRepositoryInterface;
 use App\Services\Interfaces\ThesisServiceInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Throwable;
 
 class ThesisService implements ThesisServiceInterface
 {
@@ -33,7 +38,7 @@ class ThesisService implements ThesisServiceInterface
             Thesis::STATUS_REJECTED,
         ],
         Thesis::STATUS_REVISION_REQUIRED => [Thesis::STATUS_SUBMITTED],
-        Thesis::STATUS_APPROVED => [Thesis::STATUS_ARCHIVED],
+        Thesis::STATUS_APPROVED => [],
         Thesis::STATUS_REJECTED => [],
         Thesis::STATUS_ARCHIVED => [],
     ];
@@ -89,49 +94,144 @@ class ThesisService implements ThesisServiceInterface
         });
     }
 
-    public function assignSupervisor(Thesis $thesis, int $supervisorId): Thesis
+    public function assignSupervisor(Thesis $thesis, int $supervisorId, User $actor): Thesis
     {
-        return $this->thesisRepository->update($thesis, ['supervisor_id' => $supervisorId]);
+        Gate::forUser($actor)->authorize('assignSupervisor', $thesis);
+
+        return DB::transaction(function () use ($thesis, $supervisorId, $actor) {
+            $thesis = Thesis::query()->lockForUpdate()->findOrFail($thesis->id);
+            $supervisor = Supervisor::query()
+                ->whereKey($supervisorId)
+                ->where('is_active', true)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$supervisor || (int) $supervisor->department_id !== (int) $thesis->department_id) {
+                throw ValidationException::withMessages([
+                    'supervisor_id' => ['The selected supervisor must be active and belong to the thesis department.'],
+                ]);
+            }
+
+            $assignedCount = Thesis::where('supervisor_id', $supervisor->id)
+                ->whereNotIn('status', [Thesis::STATUS_ARCHIVED, Thesis::STATUS_REJECTED])
+                ->where('id', '!=', $thesis->id)
+                ->count();
+
+            if ($assignedCount >= $supervisor->max_students) {
+                throw ValidationException::withMessages([
+                    'supervisor_id' => ['The selected supervisor has reached their thesis capacity.'],
+                ]);
+            }
+
+            $previousSupervisorId = $thesis->supervisor_id;
+            $updatedThesis = $this->thesisRepository->update($thesis, ['supervisor_id' => $supervisorId]);
+
+            AuditLogger::log(
+                action: 'thesis_supervisor_assigned',
+                modelClass: Thesis::class,
+                modelId: $thesis->id,
+                oldValues: ['supervisor_id' => $previousSupervisorId],
+                newValues: ['supervisor_id' => $supervisorId],
+                user: $actor
+            );
+
+            return $updatedThesis;
+        });
     }
 
-    public function submit(Thesis $thesis): Thesis
+    public function submit(Thesis $thesis, User $actor): Thesis
     {
-        if ($thesis->versions()->count() === 0) {
-            throw new \RuntimeException('A thesis document must be uploaded before submission.');
-        }
+        Gate::forUser($actor)->authorize('update', $thesis);
 
-        $fromStatus = $thesis->status;
-        $toStatus = $fromStatus === Thesis::STATUS_REVISION_REQUIRED
-            ? Thesis::STATUS_SUBMITTED
-            : Thesis::STATUS_SUBMITTED;
+        [$thesis, $fromStatus, $toStatus] = DB::transaction(function () use ($thesis, $actor) {
+            $thesis = Thesis::query()->lockForUpdate()->findOrFail($thesis->id);
+            Gate::forUser($actor)->authorize('update', $thesis);
+            $fromStatus = $thesis->status;
+            $toStatus = Thesis::STATUS_SUBMITTED;
 
-        $this->assertTransitionAllowed($fromStatus, $toStatus);
+            $this->assertTransitionAllowed($fromStatus, $toStatus);
 
-        $thesis = DB::transaction(function () use ($thesis, $fromStatus, $toStatus) {
+            if (!$thesis->versions()->exists()) {
+                throw ValidationException::withMessages([
+                    'file' => ['A thesis document must be uploaded before submission.'],
+                ]);
+            }
+
             $thesis->update(['status' => $toStatus, 'submitted_at' => now()]);
 
             ThesisStatusHistory::create([
                 'thesis_id' => $thesis->id,
                 'from_status' => $fromStatus,
                 'to_status' => $toStatus,
-                'changed_by' => $thesis->student->user_id,
+                'changed_by' => $actor->id,
                 'remarks' => 'Thesis submitted for supervisor review.',
             ]);
 
-            return $thesis->fresh(['student.user', 'supervisor.user']);
+            $submittedThesis = $thesis->fresh(['student.user', 'supervisor.user']);
+
+            AuditLogger::log(
+                action: 'thesis_status_changed',
+                modelClass: Thesis::class,
+                modelId: $thesis->id,
+                oldValues: ['status' => $fromStatus],
+                newValues: ['status' => $toStatus, 'remarks' => 'Thesis submitted for supervisor review.'],
+                user: $actor
+            );
+
+            return [$submittedThesis, $fromStatus, $toStatus];
         });
 
-        event(new ThesisSubmitted($thesis));
+        DB::afterCommit(fn () => event(new ThesisSubmitted($thesis)));
 
         return $thesis;
     }
 
     public function changeStatus(Thesis $thesis, string $toStatus, User $actor, ?string $remarks = null): Thesis
     {
-        $fromStatus = $thesis->status;
-        $this->assertTransitionAllowed($fromStatus, $toStatus);
+        Gate::forUser($actor)->authorize('changeStatus', $thesis);
 
-        $thesis = DB::transaction(function () use ($thesis, $fromStatus, $toStatus, $actor, $remarks) {
+        return $this->transitionStatus($thesis, $toStatus, $actor, $remarks);
+    }
+
+    public function archiveStatus(Thesis $thesis, User $actor, ?string $remarks = null): Thesis
+    {
+        Gate::forUser($actor)->authorize('archive', [\App\Models\ThesisArchive::class, $thesis]);
+
+        return $this->transitionStatus($thesis, Thesis::STATUS_ARCHIVED, $actor, $remarks, true);
+    }
+
+    private function transitionStatus(
+        Thesis $thesis,
+        string $toStatus,
+        User $actor,
+        ?string $remarks,
+        bool $archiving = false
+    ): Thesis {
+        [$thesis, $fromStatus] = DB::transaction(function () use ($thesis, $toStatus, $actor, $remarks, $archiving) {
+            $thesis = Thesis::query()->lockForUpdate()->findOrFail($thesis->id);
+            Gate::forUser($actor)->authorize(
+                $archiving ? 'archive' : 'changeStatus',
+                $archiving ? [\App\Models\ThesisArchive::class, $thesis] : $thesis
+            );
+            $fromStatus = $thesis->status;
+
+            if ($archiving && $fromStatus === Thesis::STATUS_APPROVED && $toStatus === Thesis::STATUS_ARCHIVED) {
+                // Archival is a separate privileged workflow with additional eligibility checks.
+            } else {
+                $this->assertTransitionAllowed($fromStatus, $toStatus);
+            }
+
+            if ($actor->role?->slug === 'supervisor'
+                && (!in_array($fromStatus, [Thesis::STATUS_SUBMITTED, Thesis::STATUS_UNDER_REVIEW], true)
+                    || !in_array($toStatus, [
+                        Thesis::STATUS_UNDER_REVIEW,
+                        Thesis::STATUS_REVISION_REQUIRED,
+                        Thesis::STATUS_APPROVED,
+                        Thesis::STATUS_REJECTED,
+                    ], true))) {
+                throw new \Illuminate\Auth\Access\AuthorizationException();
+            }
+
             $updateData = ['status' => $toStatus];
 
             if ($toStatus === Thesis::STATUS_APPROVED) {
@@ -148,50 +248,88 @@ class ThesisService implements ThesisServiceInterface
                 'remarks' => $remarks,
             ]);
 
-            return $thesis->fresh(['student.user', 'supervisor.user']);
+            AuditLogger::log(
+                action: 'thesis_status_changed',
+                modelClass: Thesis::class,
+                modelId: $thesis->id,
+                oldValues: ['status' => $fromStatus],
+                newValues: ['status' => $toStatus, 'remarks' => $remarks],
+                user: $actor
+            );
+
+            return [$thesis->fresh(['student.user', 'supervisor.user']), $fromStatus];
         });
 
-        event(new ThesisStatusChanged($thesis, $fromStatus, $toStatus, $remarks));
+        DB::afterCommit(fn () => event(new ThesisStatusChanged($thesis, $fromStatus, $toStatus, $remarks)));
 
         return $thesis;
     }
 
     public function uploadVersion(Thesis $thesis, UploadedFile $file, User $uploader, ?string $notes = null): ThesisVersion
     {
+        Gate::forUser($uploader)->authorize('uploadVersion', $thesis);
+
         if (!in_array($file->getMimeType(), self::ALLOWED_MIMES, true)) {
-            throw new \InvalidArgumentException('Only PDF, DOCX, and ZIP files are allowed.');
+            throw ValidationException::withMessages(['file' => ['Only PDF, DOCX, and ZIP files are allowed.']]);
         }
 
         if ($file->getSize() > self::MAX_FILE_SIZE_KB * 1024) {
-            throw new \InvalidArgumentException('File size must not exceed 20MB.');
+            throw ValidationException::withMessages(['file' => ['File size must not exceed 20MB.']]);
         }
 
-        return DB::transaction(function () use ($thesis, $file, $uploader, $notes) {
-            $nextVersion = ($thesis->versions()->max('version_number') ?? 0) + 1;
+        $path = null;
 
-            $path = $file->store("theses/{$thesis->id}/versions", 'local');
+        try {
+            return DB::transaction(function () use ($thesis, $file, $uploader, $notes, &$path) {
+                $lockedThesis = Thesis::query()->lockForUpdate()->findOrFail($thesis->id);
+                Gate::forUser($uploader)->authorize('uploadVersion', $lockedThesis);
 
-            $version = ThesisVersion::create([
-                'thesis_id' => $thesis->id,
-                'version_number' => $nextVersion,
-                'file_path' => $path,
-                'file_name' => $file->getClientOriginalName(),
-                'file_size' => $file->getSize(),
-                'mime_type' => $file->getMimeType(),
-                'uploaded_by' => $uploader->id,
-                'notes' => $notes,
-            ]);
+                if (!in_array($lockedThesis->status, [Thesis::STATUS_DRAFT, Thesis::STATUS_REVISION_REQUIRED], true)) {
+                    throw ValidationException::withMessages([
+                        'file' => ['A new version can only be uploaded for a draft or a thesis requiring revision.'],
+                    ]);
+                }
 
-            if ($thesis->status === Thesis::STATUS_DRAFT && $nextVersion === 1) {
-                // first upload keeps thesis in draft until explicit submission
+                $nextVersion = ($lockedThesis->versions()->max('version_number') ?? 0) + 1;
+                $path = $file->store("theses/{$lockedThesis->id}/versions", 'local');
+
+                if (!$path) {
+                    throw new \RuntimeException('The thesis document could not be stored.');
+                }
+
+                return ThesisVersion::create([
+                    'thesis_id' => $lockedThesis->id,
+                    'version_number' => $nextVersion,
+                    'file_path' => $path,
+                    'file_name' => $file->getClientOriginalName(),
+                    'file_size' => $file->getSize(),
+                    'mime_type' => $file->getMimeType(),
+                    'uploaded_by' => $uploader->id,
+                    'notes' => $notes,
+                ]);
+            });
+        } catch (Throwable $exception) {
+            if ($path && !Storage::disk('local')->delete($path)) {
+                Log::error('Failed to remove an uncommitted thesis version file.', [
+                    'thesis_id' => $thesis->id,
+                    'file_path' => $path,
+                ]);
             }
 
-            return $version;
-        });
+            throw $exception;
+        }
     }
 
     public function addComment(Thesis $thesis, User $author, string $content, ?int $versionId = null): Comment
     {
+        Gate::forUser($author)->authorize('comment', $thesis);
+
+        if ($versionId !== null && !$thesis->versions()->whereKey($versionId)->exists()) {
+            throw ValidationException::withMessages([
+                'thesis_version_id' => ['The selected version does not belong to this thesis.'],
+            ]);
+        }
+
         $comment = Comment::create([
             'thesis_id' => $thesis->id,
             'thesis_version_id' => $versionId,

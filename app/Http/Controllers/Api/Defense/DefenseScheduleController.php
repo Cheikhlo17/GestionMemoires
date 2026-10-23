@@ -28,6 +28,8 @@ class DefenseScheduleController extends Controller
     public function calendar(CalendarRequest $request): JsonResponse
     {
         $data = $request->validated();
+        $data['_viewer_role'] = $request->user()->role?->slug;
+        $data['_viewer_id'] = $request->user()->id;
 
         $schedules = $this->defenseService->calendar(
             \Carbon\Carbon::parse($data['from']),
@@ -46,7 +48,7 @@ class DefenseScheduleController extends Controller
         $query = DefenseSchedule::with(['thesis.student.user', 'thesis.supervisor.user', 'room', 'juryMembers.user']);
 
         if ($user->role?->slug === 'jury-member') {
-            $juryMember = JuryMember::where('user_id', $user->id)->first();
+            $juryMember = JuryMember::where('user_id', $user->id)->where('is_active', true)->first();
             $query->whereHas('juryMembers', function ($q) use ($juryMember) {
                 $q->where('jury_members.id', $juryMember?->id ?? 0);
             });
@@ -58,6 +60,12 @@ class DefenseScheduleController extends Controller
             $query->whereHas('thesis.student', function ($q) use ($user) {
                 $q->where('user_id', $user->id);
             });
+        } elseif ($user->role?->slug === 'head-of-department') {
+            $query->whereHas('thesis.department', function ($q) use ($user) {
+                $q->where('head_of_department_id', $user->id);
+            });
+        } elseif ($user->role?->slug !== 'administrator') {
+            $query->whereKey(0);
         }
 
         $schedules = $query->orderBy('scheduled_at')->get();
@@ -98,7 +106,11 @@ class DefenseScheduleController extends Controller
 
     public function assignJury(AssignJuryRequest $request, DefenseSchedule $defenseSchedule): JsonResponse
     {
-        $schedule = $this->defenseService->assignJury($defenseSchedule, $request->validated('jury'));
+        $schedule = $this->defenseService->assignJury(
+            $defenseSchedule,
+            $request->validated('jury'),
+            $request->user()
+        );
 
         return response()->json([
             'message' => 'Jury assigned successfully.',

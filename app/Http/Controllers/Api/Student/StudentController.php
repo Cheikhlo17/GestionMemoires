@@ -21,7 +21,10 @@ class StudentController extends Controller
 
     public function index(ListStudentsRequest $request): JsonResponse
     {
-        $students = $this->studentService->list($request->validated());
+        $filters = $request->validated();
+        $filters['_viewer_role'] = $request->user()->role?->slug;
+        $filters['_viewer_id'] = $request->user()->id;
+        $students = $this->studentService->list($filters);
 
         return response()->json([
             'data' => StudentResource::collection($students->items()),

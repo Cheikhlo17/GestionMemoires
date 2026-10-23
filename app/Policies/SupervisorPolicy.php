@@ -9,12 +9,18 @@ class SupervisorPolicy
 {
     public function viewAny(User $user): bool
     {
-        return true;
+        return in_array($user->role?->slug, [
+            'administrator',
+            'head-of-department',
+            'supervisor',
+            'student',
+            'jury-member',
+        ], true);
     }
 
     public function view(User $user, Supervisor $supervisor): bool
     {
-        return true;
+        return $this->viewAny($user);
     }
 
     public function create(User $user): bool

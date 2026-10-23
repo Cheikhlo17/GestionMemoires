@@ -23,7 +23,10 @@ class ThesisController extends Controller
 
     public function index(ListThesesRequest $request): JsonResponse
     {
-        $theses = $this->thesisService->list($request->validated());
+        $filters = $request->validated();
+        $filters['_viewer_role'] = $request->user()->role?->slug;
+        $filters['_viewer_id'] = $request->user()->id;
+        $theses = $this->thesisService->list($filters);
 
         return response()->json([
             'data' => ThesisResource::collection($theses->items()),
@@ -38,7 +41,19 @@ class ThesisController extends Controller
 
     public function store(StoreThesisRequest $request): JsonResponse
     {
-        $student = Student::where('user_id', $request->user()->id)->firstOrFail();
+        $student = Student::where('user_id', $request->user()->id)->first();
+
+        if (!$student) {
+            return response()->json([
+                'message' => "Aucun profil étudiant n'est associé à ce compte. Contactez l'administration.",
+            ], 422);
+        }
+
+        if (Thesis::withTrashed()->where('student_id', $student->id)->exists()) {
+            return response()->json([
+                'message' => 'Un mémoire est déjà associé à ce compte.',
+            ], 422);
+        }
 
         $thesis = $this->thesisService->create([
             ...$request->validated(),
@@ -83,7 +98,7 @@ class ThesisController extends Controller
     {
         $this->authorize('update', $thesis);
 
-        $thesis = $this->thesisService->submit($thesis);
+        $thesis = $this->thesisService->submit($thesis, $request->user());
 
         return response()->json([
             'message' => 'Thesis submitted successfully.',
@@ -93,7 +108,11 @@ class ThesisController extends Controller
 
     public function assignSupervisor(AssignSupervisorRequest $request, Thesis $thesis): JsonResponse
     {
-        $thesis = $this->thesisService->assignSupervisor($thesis, $request->validated('supervisor_id'));
+        $thesis = $this->thesisService->assignSupervisor(
+            $thesis,
+            $request->validated('supervisor_id'),
+            $request->user()
+        );
 
         return response()->json([
             'message' => 'Supervisor assigned successfully.',

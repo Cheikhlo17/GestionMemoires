@@ -57,10 +57,10 @@ class AcademicYearController extends Controller
 
     public function destroy(AcademicYear $academicYear): JsonResponse
     {
-        if ($academicYear->students()->exists()) {
+        if ($academicYear->students()->exists() || $academicYear->theses()->exists()) {
             return response()->json([
-                'message' => 'This academic year still has enrolled students and cannot be deleted.',
-            ], 422);
+                'message' => 'This academic year is still referenced by students or theses and cannot be deleted.',
+            ], 409);
         }
 
         $academicYear->delete();

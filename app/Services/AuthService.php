@@ -28,7 +28,7 @@ class AuthService implements AuthServiceInterface
             $studentRole = Role::where('slug', 'student')->firstOrFail();
 
             $user = $this->userRepository->create([
-                'role_id' => $data['role_id'] ?? $studentRole->id,
+                'role_id' => $studentRole->id,
                 'first_name' => $data['first_name'],
                 'last_name' => $data['last_name'],
                 'email' => $data['email'],

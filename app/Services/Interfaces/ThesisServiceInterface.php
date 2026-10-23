@@ -21,11 +21,13 @@ interface ThesisServiceInterface
 
     public function delete(Thesis $thesis): void;
 
-    public function assignSupervisor(Thesis $thesis, int $supervisorId): Thesis;
+    public function assignSupervisor(Thesis $thesis, int $supervisorId, User $actor): Thesis;
 
-    public function submit(Thesis $thesis): Thesis;
+    public function submit(Thesis $thesis, User $actor): Thesis;
 
     public function changeStatus(Thesis $thesis, string $toStatus, User $actor, ?string $remarks = null): Thesis;
+
+    public function archiveStatus(Thesis $thesis, User $actor, ?string $remarks = null): Thesis;
 
     public function uploadVersion(Thesis $thesis, UploadedFile $file, User $uploader, ?string $notes = null): ThesisVersion;
 

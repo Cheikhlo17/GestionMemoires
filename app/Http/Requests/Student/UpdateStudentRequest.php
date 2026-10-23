@@ -16,18 +16,33 @@ class UpdateStudentRequest extends FormRequest
     {
         $studentId = $this->route('student')?->id;
         $userId = $this->route('student')?->user_id;
+        $isAdministrator = $this->user()->role?->slug === 'administrator';
 
-        return [
+        $rules = [
             'first_name' => ['sometimes', 'string', 'max:100'],
             'last_name' => ['sometimes', 'string', 'max:100'],
             'email' => ['sometimes', 'email', 'max:255', Rule::unique('users', 'email')->ignore($userId)],
             'phone' => ['nullable', 'string', 'max:30'],
-            'department_id' => ['sometimes', 'exists:departments,id'],
-            'program_id' => ['sometimes', 'exists:programs,id'],
-            'academic_year_id' => ['sometimes', 'exists:academic_years,id'],
-            'student_number' => ['sometimes', 'string', 'max:50', Rule::unique('students', 'student_number')->ignore($studentId)],
-            'enrollment_date' => ['sometimes', 'date'],
-            'status' => ['sometimes', 'in:active,graduated,suspended,withdrawn'],
+        ];
+
+        if ($isAdministrator) {
+            return $rules + [
+                'department_id' => ['sometimes', 'exists:departments,id'],
+                'program_id' => ['sometimes', 'exists:programs,id'],
+                'academic_year_id' => ['sometimes', 'exists:academic_years,id'],
+                'student_number' => ['sometimes', 'string', 'max:50', Rule::unique('students', 'student_number')->ignore($studentId)],
+                'enrollment_date' => ['sometimes', 'date'],
+                'status' => ['sometimes', 'in:active,graduated,suspended,withdrawn'],
+            ];
+        }
+
+        return $rules + [
+            'department_id' => ['prohibited'],
+            'program_id' => ['prohibited'],
+            'academic_year_id' => ['prohibited'],
+            'student_number' => ['prohibited'],
+            'enrollment_date' => ['prohibited'],
+            'status' => ['prohibited'],
         ];
     }
 }
