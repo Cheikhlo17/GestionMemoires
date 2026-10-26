@@ -24,6 +24,7 @@ class DefenseSchedule extends Model
         'scheduled_at',
         'duration_minutes',
         'status',
+        'is_public',
         'created_by',
     ];
 
@@ -32,6 +33,7 @@ class DefenseSchedule extends Model
         return [
             'scheduled_at' => 'datetime',
             'duration_minutes' => 'integer',
+            'is_public' => 'boolean',
         ];
     }
 

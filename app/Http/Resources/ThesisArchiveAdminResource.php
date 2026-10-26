@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\GradeMentionResolver;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -30,6 +31,7 @@ class ThesisArchiveAdminResource extends JsonResource
                 : [],
             'defense_date' => $this->defenseSchedule?->scheduled_at,
             'final_grade' => $result?->final_grade,
+            'mention' => GradeMentionResolver::forGrade($result?->final_grade),
             'verdict' => $result?->verdict,
             'final_version' => [
                 'id' => $this->finalVersion->id,

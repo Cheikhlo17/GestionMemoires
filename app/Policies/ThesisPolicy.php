@@ -52,6 +52,27 @@ class ThesisPolicy
             || $this->isDepartmentHeadOf($user, $thesis);
     }
 
+    public function createCorrection(User $user, Thesis $thesis): bool
+    {
+        if ($user->role?->slug === 'administrator') {
+            return true;
+        }
+
+        if ($user->role?->slug === 'supervisor') {
+            return (int) $thesis->supervisor?->user_id === (int) $user->id;
+        }
+
+        return $this->isDepartmentHeadOf($user, $thesis);
+    }
+
+    public function createMeeting(User $user, Thesis $thesis): bool
+    {
+        $role = $user->role?->slug;
+
+        return ($role === 'student' && (int) $thesis->student?->user_id === (int) $user->id)
+            || ($role === 'supervisor' && (int) $thesis->supervisor?->user_id === (int) $user->id);
+    }
+
     public function assignSupervisor(User $user, Thesis $thesis): bool
     {
         return $user->role?->slug === 'administrator' || $this->isDepartmentHeadOf($user, $thesis);

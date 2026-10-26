@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\GradeMentionResolver;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -12,6 +13,7 @@ class DefenseResultResource extends JsonResource
         return [
             'id' => $this->id,
             'final_grade' => $this->final_grade,
+            'mention' => GradeMentionResolver::forGrade($this->final_grade),
             'verdict' => $this->verdict,
             'remarks' => $this->remarks,
             'recorded_at' => $this->recorded_at,

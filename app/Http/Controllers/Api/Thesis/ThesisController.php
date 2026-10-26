@@ -58,7 +58,7 @@ class ThesisController extends Controller
         $thesis = $this->thesisService->create([
             ...$request->validated(),
             'student_id' => $student->id,
-        ]);
+        ])->load(['student.user', 'subject', 'department', 'program', 'academicYear']);
 
         return response()->json([
             'message' => 'Thesis draft created successfully.',

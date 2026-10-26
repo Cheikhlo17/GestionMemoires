@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\GradeMentionResolver;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -27,6 +28,9 @@ class ThesisArchivePublicResource extends JsonResource
                 : [],
             'defense_date' => $this->defenseSchedule?->scheduled_at,
             'final_grade' => $this->show_final_grade ? ($result?->final_grade) : null,
+            'mention' => $this->show_final_grade
+                ? GradeMentionResolver::forGrade($result?->final_grade)
+                : null,
             'archived_at' => $this->archived_at,
             'can_download' => $this->isPublic(),
         ];

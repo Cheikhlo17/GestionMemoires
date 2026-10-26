@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\AcademicYearController;
+use App\Http\Controllers\Api\Admin\CsvImportController;
 use App\Http\Controllers\Api\Admin\DepartmentController;
 use App\Http\Controllers\Api\Admin\ProgramController;
 use App\Http\Controllers\Api\Admin\ThesisArchiveController;
@@ -8,12 +9,17 @@ use App\Http\Controllers\Api\Admin\UserManagementController;
 use App\Http\Controllers\Api\Archive\ArchiveController;
 use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\Defense\DefenseJuryEvaluationController;
+use App\Http\Controllers\Api\Defense\PublicDefenseCalendarController;
+use App\Http\Controllers\Api\Defense\PreDefenseSessionController;
 use App\Http\Controllers\Api\Defense\DefenseScheduleController;
 use App\Http\Controllers\Api\Lookup\LookupController;
 use App\Http\Controllers\Api\Student\StudentController;
+use App\Http\Controllers\Api\Supervision\SupervisionMeetingController;
 use App\Http\Controllers\Api\Supervisor\SupervisorController;
 use App\Http\Controllers\Api\Thesis\ThesisCommentController;
+use App\Http\Controllers\Api\Thesis\ThesisCorrectionController;
 use App\Http\Controllers\Api\Thesis\ThesisController;
+use App\Http\Controllers\Api\Thesis\ThesisSubjectController;
 use App\Http\Controllers\Api\Thesis\ThesisVersionController;
 use Illuminate\Support\Facades\Route;
 
@@ -42,7 +48,18 @@ Route::prefix('archives')->group(function () {
     Route::get('/{archive}/download', [ArchiveController::class, 'download']);
 });
 
+Route::get('defense-calendar', [PublicDefenseCalendarController::class, 'index']);
+
 Route::middleware(['auth:sanctum', 'active'])->group(function () {
+    Route::get('thesis-subjects', [ThesisSubjectController::class, 'index']);
+    Route::post('thesis-subjects', [ThesisSubjectController::class, 'storeProposal']);
+    Route::post('thesis-subjects/published', [ThesisSubjectController::class, 'publish']);
+    Route::get('thesis-subjects/{thesisSubject}', [ThesisSubjectController::class, 'show']);
+    Route::put('thesis-subjects/{thesisSubject}', [ThesisSubjectController::class, 'updateProposal']);
+    Route::post('thesis-subjects/{thesisSubject}/submit', [ThesisSubjectController::class, 'submit']);
+    Route::post('thesis-subjects/{thesisSubject}/select', [ThesisSubjectController::class, 'select']);
+    Route::post('thesis-subjects/{thesisSubject}/review', [ThesisSubjectController::class, 'review']);
+
     Route::apiResource('students', StudentController::class);
 
     Route::get('supervisors/me', [SupervisorController::class, 'me']);
@@ -59,13 +76,37 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
 
     Route::get('theses/{thesis}/comments', [ThesisCommentController::class, 'index']);
     Route::post('theses/{thesis}/comments', [ThesisCommentController::class, 'store']);
+    Route::get('theses/{thesis}/corrections', [ThesisCorrectionController::class, 'index']);
+    Route::post('theses/{thesis}/corrections', [ThesisCorrectionController::class, 'store']);
+    Route::post(
+        'theses/{thesis}/corrections/{correction}/status',
+        [ThesisCorrectionController::class, 'updateStatus']
+    );
+
+    Route::get('supervision-meetings', [SupervisionMeetingController::class, 'index']);
+    Route::post('theses/{thesis}/supervision-meetings', [SupervisionMeetingController::class, 'store']);
+    Route::get('supervision-meetings/{meeting}', [SupervisionMeetingController::class, 'show']);
+    Route::put('supervision-meetings/{meeting}', [SupervisionMeetingController::class, 'update']);
+    Route::post('supervision-meetings/{meeting}/actions', [SupervisionMeetingController::class, 'storeAction']);
+    Route::put('supervision-meetings/{meeting}/actions/{action}', [SupervisionMeetingController::class, 'updateAction']);
 
     Route::get('defense-schedules/calendar', [DefenseScheduleController::class, 'calendar']);
+    Route::get('pre-defense-sessions', [PreDefenseSessionController::class, 'index']);
+    Route::post('pre-defense-sessions', [PreDefenseSessionController::class, 'store']);
+    Route::get('pre-defense-sessions/{session}', [PreDefenseSessionController::class, 'show']);
+    Route::put('pre-defense-sessions/{session}', [PreDefenseSessionController::class, 'update']);
+    Route::post('pre-defense-sessions/{session}/status', [PreDefenseSessionController::class, 'updateStatus']);
+    Route::post('pre-defense-sessions/{session}/passages', [PreDefenseSessionController::class, 'storePassage']);
+    Route::put(
+        'pre-defense-sessions/{session}/passages/{passage}',
+        [PreDefenseSessionController::class, 'updatePassage']
+    );
     Route::get('defense-schedules/mine', [DefenseScheduleController::class, 'mine']);
     Route::post('defense-schedules', [DefenseScheduleController::class, 'store']);
     Route::get('defense-schedules/{defense_schedule}', [DefenseScheduleController::class, 'show']);
     Route::put('defense-schedules/{defense_schedule}', [DefenseScheduleController::class, 'update']);
     Route::post('defense-schedules/{defense_schedule}/assign-jury', [DefenseScheduleController::class, 'assignJury']);
+    Route::put('defense-schedules/{defense_schedule}/publication', [DefenseScheduleController::class, 'updatePublication']);
     Route::post('defense-schedules/{defense_schedule}/cancel', [DefenseScheduleController::class, 'cancel']);
     Route::post('defense-schedules/{defense_schedule}/result', [DefenseScheduleController::class, 'recordResult']);
     Route::get('defense-schedules/{defense_schedule}/report', [DefenseScheduleController::class, 'generateReport']);
@@ -90,6 +131,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             Route::apiResource('academic-years', AcademicYearController::class)->except(['show']);
             Route::get('users', [UserManagementController::class, 'index']);
             Route::post('users/{user}/toggle-active', [UserManagementController::class, 'toggleActive']);
+            Route::get('imports/{type}/template', [CsvImportController::class, 'template'])
+                ->whereIn('type', ['students', 'jury-members']);
+            Route::post('imports/{type}/preview', [CsvImportController::class, 'preview'])
+                ->whereIn('type', ['students', 'jury-members']);
+            Route::post('imports/{type}/confirm', [CsvImportController::class, 'confirm'])
+                ->whereIn('type', ['students', 'jury-members']);
         });
 
         Route::middleware('role:administrator,head-of-department')->group(function () {

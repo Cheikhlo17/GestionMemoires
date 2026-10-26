@@ -20,6 +20,7 @@ class ThesisRepository implements ThesisRepositoryInterface
             'department',
             'program',
             'academicYear',
+            'subject',
         ]);
 
         $viewerRole = $filters['_viewer_role'] ?? null;
@@ -78,6 +79,7 @@ class ThesisRepository implements ThesisRepositoryInterface
             'department',
             'program',
             'academicYear',
+            'subject',
             'versions.uploader',
             'comments.author',
             'statusHistories.changedBy',

@@ -52,6 +52,11 @@ class DefenseSchedulePolicy
         return $user->role?->slug === 'administrator' || $this->isDepartmentHeadFor($user, $schedule);
     }
 
+    public function publish(User $user, DefenseSchedule $schedule): bool
+    {
+        return $user->role?->slug === 'administrator' || $this->isDepartmentHeadFor($user, $schedule);
+    }
+
     public function submitEvaluation(User $user, DefenseSchedule $schedule): bool
     {
         return $user->role?->slug === 'jury-member'

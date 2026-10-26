@@ -40,6 +40,7 @@
     @if ($schedule->result)
         <table>
             <tr><td class="label">Final Grade</td><td>{{ $schedule->result->final_grade ?? 'N/A' }} / 20</td></tr>
+            <tr><td class="label">Mention</td><td>{{ \App\Support\GradeMentionResolver::forGrade($schedule->result->final_grade) ?? 'Non configurée' }}</td></tr>
             <tr><td class="label">Verdict</td><td class="verdict">{{ str_replace('_', ' ', $schedule->result->verdict) }}</td></tr>
             <tr><td class="label">Remarks</td><td>{{ $schedule->result->remarks ?? '—' }}</td></tr>
         </table>

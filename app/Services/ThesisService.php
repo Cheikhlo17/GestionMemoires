@@ -8,6 +8,7 @@ use App\Events\ThesisSubmitted;
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Models\Comment;
 use App\Models\Thesis;
+use App\Models\ThesisSubject;
 use App\Models\ThesisStatusHistory;
 use App\Models\ThesisVersion;
 use App\Models\Supervisor;
@@ -75,7 +76,22 @@ class ThesisService implements ThesisServiceInterface
     {
         $data['status'] = Thesis::STATUS_DRAFT;
 
-        return $this->thesisRepository->create($data);
+        return DB::transaction(function () use ($data) {
+            $subject = ThesisSubject::query()
+                ->lockForUpdate()
+                ->whereKey($data['thesis_subject_id'] ?? null)
+                ->where('student_id', $data['student_id'])
+                ->where('status', ThesisSubject::STATUS_ACCEPTED)
+                ->first();
+
+            if (!$subject) {
+                throw ValidationException::withMessages([
+                    'thesis_subject_id' => ['An accepted subject assigned to this student is required.'],
+                ]);
+            }
+
+            return $this->thesisRepository->create($data);
+        });
     }
 
     public function update(Thesis $thesis, array $data): Thesis
@@ -151,6 +167,18 @@ class ThesisService implements ThesisServiceInterface
 
             $this->assertTransitionAllowed($fromStatus, $toStatus);
 
+            $hasAcceptedSubject = ThesisSubject::query()
+                ->whereKey($thesis->thesis_subject_id)
+                ->where('student_id', $thesis->student_id)
+                ->where('status', ThesisSubject::STATUS_ACCEPTED)
+                ->exists();
+
+            if (!$hasAcceptedSubject) {
+                throw ValidationException::withMessages([
+                    'thesis_subject_id' => ['An accepted subject assigned to this student is required before submission.'],
+                ]);
+            }
+
             if (!$thesis->versions()->exists()) {
                 throw ValidationException::withMessages([
                     'file' => ['A thesis document must be uploaded before submission.'],
@@ -219,6 +247,20 @@ class ThesisService implements ThesisServiceInterface
                 // Archival is a separate privileged workflow with additional eligibility checks.
             } else {
                 $this->assertTransitionAllowed($fromStatus, $toStatus);
+            }
+
+            if ($toStatus === Thesis::STATUS_SUBMITTED) {
+                $hasAcceptedSubject = ThesisSubject::query()
+                    ->whereKey($thesis->thesis_subject_id)
+                    ->where('student_id', $thesis->student_id)
+                    ->where('status', ThesisSubject::STATUS_ACCEPTED)
+                    ->exists();
+
+                if (!$hasAcceptedSubject) {
+                    throw ValidationException::withMessages([
+                        'thesis_subject_id' => ['An accepted subject assigned to this student is required before submission.'],
+                    ]);
+                }
             }
 
             if ($actor->role?->slug === 'supervisor'

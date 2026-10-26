@@ -23,6 +23,7 @@ class Thesis extends Model
 
     protected $fillable = [
         'student_id',
+        'thesis_subject_id',
         'supervisor_id',
         'department_id',
         'program_id',
@@ -45,6 +46,11 @@ class Thesis extends Model
     public function student(): BelongsTo
     {
         return $this->belongsTo(Student::class);
+    }
+
+    public function subject(): BelongsTo
+    {
+        return $this->belongsTo(ThesisSubject::class, 'thesis_subject_id');
     }
 
     public function supervisor(): BelongsTo
@@ -75,6 +81,16 @@ class Thesis extends Model
     public function comments(): HasMany
     {
         return $this->hasMany(Comment::class)->orderByDesc('created_at');
+    }
+
+    public function corrections(): HasMany
+    {
+        return $this->hasMany(ThesisCorrection::class);
+    }
+
+    public function supervisionMeetings(): HasMany
+    {
+        return $this->hasMany(SupervisionMeeting::class);
     }
 
     public function statusHistories(): HasMany

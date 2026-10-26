@@ -13,6 +13,11 @@ class ThesisResource extends JsonResource
             'id' => $this->id,
             'title' => $this->title,
             'abstract' => $this->abstract,
+            'subject' => $this->whenLoaded('subject', fn () => [
+                'id' => $this->subject->id,
+                'title' => $this->subject->title,
+                'status' => $this->subject->status,
+            ]),
             'status' => $this->status,
             'submitted_at' => $this->submitted_at,
             'approved_at' => $this->approved_at,

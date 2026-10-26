@@ -19,6 +19,8 @@ interface DefenseScheduleServiceInterface
 
     public function assignJury(DefenseSchedule $schedule, array $juryAssignments, User $actor): DefenseSchedule;
 
+    public function setPublic(DefenseSchedule $schedule, bool $isPublic, User $actor): DefenseSchedule;
+
     public function cancel(DefenseSchedule $schedule, string $reason, User $actor): DefenseSchedule;
 
     public function recordResult(DefenseSchedule $schedule, array $data, User $actor): DefenseResult;

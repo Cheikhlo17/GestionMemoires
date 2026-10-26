@@ -8,6 +8,7 @@ use App\Http\Requests\Defense\CalendarRequest;
 use App\Http\Requests\Defense\CancelDefenseRequest;
 use App\Http\Requests\Defense\RecordResultRequest;
 use App\Http\Requests\Defense\StoreDefenseScheduleRequest;
+use App\Http\Requests\Defense\UpdateDefensePublicationRequest;
 use App\Http\Requests\Defense\UpdateDefenseScheduleRequest;
 use App\Http\Resources\DefenseResultResource;
 use App\Http\Resources\DefenseScheduleResource;
@@ -18,6 +19,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Validation\ValidationException;
 
 class DefenseScheduleController extends Controller
 {
@@ -118,6 +120,22 @@ class DefenseScheduleController extends Controller
         ]);
     }
 
+    public function updatePublication(
+        UpdateDefensePublicationRequest $request,
+        DefenseSchedule $defenseSchedule
+    ): JsonResponse {
+        $schedule = $this->defenseService->setPublic(
+            $defenseSchedule,
+            $request->boolean('is_public'),
+            $request->user()
+        );
+
+        return response()->json([
+            'message' => 'Defense publication updated successfully.',
+            'data' => new DefenseScheduleResource($schedule),
+        ]);
+    }
+
     public function cancel(CancelDefenseRequest $request, DefenseSchedule $defenseSchedule): JsonResponse
     {
         $schedule = $this->defenseService->cancel($defenseSchedule, $request->validated('reason'), $request->user());
@@ -145,6 +163,14 @@ class DefenseScheduleController extends Controller
         $this->authorize('generateReport', $defenseSchedule);
 
         $schedule = $this->defenseService->find($defenseSchedule->id);
+        if ($schedule->status !== DefenseSchedule::STATUS_COMPLETED
+            || !$schedule->result?->verdict
+            || !$schedule->result?->recorded_at
+            || !$schedule->result?->recorded_by) {
+            throw ValidationException::withMessages([
+                'result' => ['An officially recorded final result is required before generating the defense report.'],
+            ]);
+        }
 
         $pdf = Pdf::loadView('reports.defense-report', ['schedule' => $schedule]);
 

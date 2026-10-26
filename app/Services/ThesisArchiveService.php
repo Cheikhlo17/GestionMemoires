@@ -47,7 +47,7 @@ class ThesisArchiveService implements ThesisArchiveServiceInterface
 
         if ($defenseSchedule) {
             $result = DefenseResult::where('defense_schedule_id', $defenseSchedule->id)->first();
-            if (!$result || !$result->verdict) {
+            if (!$result || !$result->verdict || !$result->recorded_at || !$result->recorded_by) {
                 $reasons[] = 'A final defense result must be recorded before archiving.';
             } elseif ($result->verdict === 'fail') {
                 $reasons[] = 'A failed defense cannot be archived.';
@@ -107,7 +107,13 @@ class ThesisArchiveService implements ThesisArchiveServiceInterface
                 user: $actor
             );
 
-            return $archive->load(['thesis.student.user', 'thesis.supervisor.user', 'finalVersion', 'defenseSchedule.juryMembers.user']);
+            return $archive->load([
+                'thesis.student.user',
+                'thesis.supervisor.user',
+                'finalVersion',
+                'defenseSchedule.result',
+                'defenseSchedule.juryMembers.user',
+            ]);
         });
     }
 
@@ -132,7 +138,13 @@ class ThesisArchiveService implements ThesisArchiveServiceInterface
                 user: $actor
             );
 
-            return $archive->fresh(['thesis.student.user', 'thesis.supervisor.user', 'finalVersion', 'defenseSchedule.juryMembers.user']);
+            return $archive->fresh([
+                'thesis.student.user',
+                'thesis.supervisor.user',
+                'finalVersion',
+                'defenseSchedule.result',
+                'defenseSchedule.juryMembers.user',
+            ]);
         });
     }
 
@@ -180,6 +192,7 @@ class ThesisArchiveService implements ThesisArchiveServiceInterface
             'thesis.academicYear',
             'finalVersion',
             'defenseSchedule.juryMembers.user',
+            'defenseSchedule.result',
         ]);
 
         if (!empty($filters['visibility'])) {

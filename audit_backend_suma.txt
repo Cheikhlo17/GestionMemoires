@@ -1,5 +1,6 @@
 AUDIT TECHNIQUE DU BACKEND SUMA
-Date : 20 octobre 2026
+Audit initial : 20 octobre 2026
+Mise à jour : 24 octobre 2026
 Périmètre : analyse statique du dépôt Laravel, sans accès à la base réelle et sans modification préalable du code.
 
 ======================================================================
@@ -15,9 +16,9 @@ L’état général est toutefois partiel : plusieurs parcours existent dans le 
 - ÉLEVÉ — recherche publique d’archives : le orWhereJsonContains non regroupé dans ThesisArchiveService peut faire apparaître des archives privées dans une recherche publique par mot-clé.
 - ÉLEVÉ — archive liée à une mauvaise version : l’identifiant thesis_version_id fourni lors de l’archivage est vérifié globalement, mais pas contre le mémoire archivé ni contre le type PDF.
 - Autorisations administratives inégales : certaines routes sous /api/admin ne vérifient pas le rôle administrateur, notamment la suppression d’une année académique.
-- Tests métier absents : les deux tests présents sont des tests d’exemple et ne couvrent ni les routes métier ni les autorisations.
+- À la date de l’audit initial, les tests métier étaient absents ; les tests ajoutés et exécutés le 24 octobre sont récapitulés en sections I et M.
 
-L’audit est statique et en lecture seule. Aucune migration, aucun test et aucune opération sur la base réelle n’ont été exécutés. La commande non destructive php artisan route:list --json n’a pas produit de résultat dans le délai d’attente et a été arrêtée ; le catalogue ci-dessous est reconstitué à partir des déclarations de routes et de leurs contrôleurs.
+L’audit initial était statique et en lecture seule. À cette date, aucune migration, aucun test et aucune opération sur la base réelle n’avaient été exécutés. La commande non destructive php artisan route:list --json n’avait pas produit de résultat dans le délai d’attente et avait été arrêtée ; le catalogue ci-dessous était reconstitué à partir des déclarations de routes et de leurs contrôleurs. Les vérifications postérieures figurent en section M.
 
 Deux fichiers étaient déjà modifiés dans l’arbre de travail au début de l’audit. Les constats décrivent leur contenu actuel ; ces modifications ne proviennent pas de cet audit :
 
@@ -310,17 +311,35 @@ D. INVENTAIRE DES FONCTIONNALITÉS MÉTIER
 - Définition et attribution des mémoires — PARTIELLE.
   ThesisController, ThesisService et affectation d’encadreur. hasCapacity existe, mais l’affectation ne l’utilise pas. Contrôle départemental et activation de l’encadreur incomplets.
 
+- Sujets de mémoire — IMPLÉMENTÉE selon les changements du 24 octobre.
+  Propositions, publication, sélection, décision et historique. La création/soumission d’un mémoire exige désormais un sujet accepté attribué à l’étudiant. Voir la section M pour le périmètre et les tests.
+
 - Dépôt et versions — IMPLÉMENTÉE, AVEC LIMITES.
   ThesisVersionController, versionnage numérique, dépôt PDF/DOCX/ZIP. Aucun contrôle de statut avant dépôt, aucune limite de nombre de versions ; une transaction DB ne restaure pas les fichiers en cas d’échec.
 
 - Corrections, commentaires et historique — PARTIELLE.
-  ThesisCommentController, événements et notifications ; ThesisStatusHistory. Référence de version d’un commentaire non vérifiée contre le mémoire ; archivage sans entrée d’historique de statut.
+  Un workflow de corrections lié à une version existante, avec historique et autorisations, a été ajouté. Les remarques initiales sur les commentaires génériques et l’historique de l’archivage restent à vérifier ; le workflow de corrections ne les résout pas automatiquement.
 
 - Cycle de vie du mémoire — PARTIELLE.
   Statuts et transitions dans Thesis et ThesisService. Transitions approuvé/archivé divergentes du chemin d’archivage ; exceptions de transition non converties explicitement en réponse HTTP 422.
 
 - Planification des soutenances — PARTIELLE.
   DefenseScheduleService, contrôleur, salles et conflits de calendrier. Une seule soutenance par mémoire selon le schéma ; contrôles de conflit soumis à des courses concurrentes et à une dépendance au moteur SQL ; aucune validation du statut d’éligibilité du mémoire.
+
+- Pré-soutenances — IMPLÉMENTÉE selon les changements du 24 octobre.
+  Sessions, passages ordonnés, observations/recommandations, résultats, historique, autorisations et contrôles de conflits. Ce parcours est distinct de la soutenance officielle.
+
+- Calendrier public — IMPLÉMENTÉ selon les changements du 24 octobre.
+  Endpoint de lecture filtré des soutenances planifiées explicitement publiées ; ressource publique excluant les identités étudiant/encadreur, résultats et documents.
+
+- Résultat et mention académique — MENTION CONFIGURABLE.
+  Résolution centralisée, réutilisée dans les ressources et rapport PDF ; les seuils proviennent de `ACADEMIC_GRADE_MENTIONS`. La configuration par défaut est vide et doit être définie par l’établissement.
+
+- Réunions d’encadrement — IMPLÉMENTÉE selon les changements du 24 octobre.
+  Réunions privées étudiant/encadreur, actions, états et historique avec autorisations participant.
+
+- Import CSV — IMPLÉMENTÉ selon les changements du 24 octobre.
+  Import administrateur des étudiants et membres du jury avec gabarit, prévisualisation, confirmation, validation des lignes, détection des doublons et transaction. Limites et tests détaillés en section M.
 
 - Salles et disponibilités — PARTIELLE.
   Modèle DefenseRoom, migration et endpoint de lookup ; contrôle de collision. Aucun contrôleur CRUD de salles ; calendrier et lookups non paginés.
@@ -335,7 +354,7 @@ D. INVENTAIRE DES FONCTIONNALITÉS MÉTIER
   Filtres pour mémoires, étudiants, archives, soutenances et utilisateurs. Périmètre parfois global ; filtres sans validation dédiée ou sans limite de pagination ; recherches LIKE contenant des jokers potentiellement coûteuses.
 
 - Notifications et rappels — PARTIELLE.
-  Événements/listeners de dépôt, statut et commentaires ; notifications mail et base de données ; notifications de soutenance. Aucune migration notifications identifiée, aucun endpoint de consultation, aucun rappel planifié ou job métier récurrent identifié.
+  Événements/listeners de dépôt, statut et commentaires ; notifications mail et base de données ; notifications de soutenance. Une migration pour la table `notifications` a été ajoutée le 24 octobre, mais son application à la base réelle n’est pas vérifiée. Aucun endpoint de consultation, aucun rappel planifié ou job métier récurrent identifié.
 
 - Tableaux de bord et statistiques — ABSENTS dans le code examiné.
   Aucun contrôleur ou endpoint dédié identifié.
@@ -376,7 +395,7 @@ Le tableau suivant décrit le schéma attendu par les migrations, pas l’état 
 - Archives : thesis_archives.
   Une archive par mémoire ; référence à une version et éventuellement à une soutenance ; visibilité publique/privée, mots-clés JSON, option de publication de la note.
 
-- Audit et infrastructure : audit_logs ; migrations de cache et de jobs. Aucune migration dédiée à la table Laravel notifications n’a été trouvée.
+- Audit et infrastructure : audit_logs ; migrations de cache et de jobs ; migration Laravel `notifications` ajoutée le 24 octobre (application à la base réelle non vérifiée).
 
 Points d’intégrité :
 
@@ -457,13 +476,13 @@ H. FICHIERS ET TRAITEMENTS DES DOCUMENTS
 I. QUALITÉ TECHNIQUE ET TESTS
 ======================================================================
 
-- Tests : seuls tests/Unit/ExampleTest.php et tests/Feature/ExampleTest.php ont été identifiés ; ils testent respectivement une assertion triviale et la page d’accueil. Aucun test métier, d’autorisation, d’upload, de transition ou d’archivage n’a été trouvé. Les tests n’ont pas été exécutés.
+- Tests : le constat initial d’absence de tests métier est obsolète. Au 24 octobre, les tests couvrent notamment les nouveaux parcours sujet, correction, réunion, pré-soutenance, calendrier public, mentions et imports CSV. `php artisan test --compact` réussit avec 24 tests et 91 assertions. Cette suite ne couvre pas toutes les limites historiques énumérées dans cet audit.
 - Transactions : présentes pour l’inscription, plusieurs opérations étudiant/encadreur, changements de statut, création de soutenance, affectation du jury et archivage. Elles ne couvrent pas les effets de stockage fichier.
 - Courses concurrentes : les contrôles de disponibilité de salle et de jury précèdent certaines transactions d’écriture ; deux requêtes concurrentes peuvent passer le contrôle avant de créer leurs créneaux. Les contraintes d’unicité DB ne remplacent pas ces contrôles.
 - Compatibilité SQL : le contrôle de chevauchement utilise DATE_ADD(... INTERVAL ... MINUTE), syntaxe dépendante du moteur. Le fichier PHPUnit déclare SQLite en mémoire ; cette requête n’est pas portable telle quelle vers SQLite.
 - Pagination et performance : les listes de soutenances mine et calendrier, les versions, commentaires, évaluations et plusieurs lookups sont chargés sans pagination. Les recherches %terme% et plusieurs relations peuvent provoquer des scans coûteux.
 - Historique : les changements de statut usuels sont historisés ; l’archivage direct, les révisions d’évaluations et les remplacements de résultats ne conservent pas un historique complet.
-- Notifications : les listeners de commentaires, soumission et changement de statut implémentent ShouldQueue ; certaines notifications utilisent le canal database, mais aucune migration de table notifications n’a été trouvée. Délivrabilité mail, worker de queue et schéma de notification non testés.
+- Notifications : les listeners de commentaires, soumission et changement de statut implémentent ShouldQueue ; certaines notifications utilisent le canal database. Une migration de table notifications est désormais présente, mais n’a pas été appliquée à la base de déploiement ; délivrabilité mail et worker de queue restent non testés.
 - Marqueurs de simulation : les appels Faker identifiés appartiennent aux factories ; aucun mock de route ou stub métier explicite n’a été identifié.
 - Migration et commandes : aucune migration n’a été lancée. php artisan route:list --json a été tenté sans modification attendue des données, mais la commande est restée sans sortie pendant le délai d’attente et a été arrêtée.
 
@@ -492,11 +511,13 @@ IMPLÉMENTÉES SELON LE CODE
 - Versions de fichiers, commentaires, transitions usuelles de statut.
 - Planification de soutenance, affectation du jury, évaluations et résultat final.
 - Archivage, catalogue public, rapport PDF et notifications email déclarées.
+- Sujets de mémoire, suivi des corrections, réunions d’encadrement et pré-soutenances (ajouts du 24 octobre ; voir section M).
+- Calendrier public des soutenances à publication explicite, imports CSV administrateur et résolution configurable de mention (ajouts du 24 octobre ; voir section M).
 
 PARTIELLES
 - Gestion des rôles/permissions, sécurité des listes, cohérence des relations, historique.
 - Contraintes d’archivage, gestion des erreurs métier, disponibilité concurrente.
-- Notifications en base, audit, administration et téléchargement d’archives.
+- Notifications en base (migration ajoutée, déploiement non vérifié), audit, administration et téléchargement d’archives.
 
 SIMULÉES
 - Aucune fonctionnalité métier simulée identifiée.
@@ -521,11 +542,54 @@ L. LIMITES DE L’AUDIT
 
 - L’analyse porte sur le code, les routes, migrations, modèles, validations, policies, contrôleurs, services, ressources, notifications, configuration applicative non sensible et tests disponibles dans le dépôt.
 - La base réelle n’a pas été consultée : aucune affirmation n’est faite sur son schéma effectivement installé, ses migrations appliquées ou ses données.
-- Les tests n’ont pas été exécutés ; aucune migration ni commande modifiant une base ou des fichiers métier n’a été lancée.
+- À la date de l’audit initial, les tests n’avaient pas été exécutés. Après les changements du 24 octobre, `php artisan test --compact` a réussi (24 tests, 91 assertions). Aucune migration n’a été lancée contre une base réelle.
 - php artisan route:list --json a été interrompu après attente sans résultat ; les routes ont été reconstituées depuis les déclarations source, notamment l’expansion des apiResource.
 - Le contenu du fichier .env n’a pas été lu ni reproduit.
 - Aucun service externe, stockage distant, serveur mail ou worker de queue n’a été contacté.
 - Le frontend Angular n’étant pas présent dans l’espace de travail, la comparaison avec ses appels reste non confirmée.
 - Les deux modifications préexistantes de ThesisController.php et ThesisService.php ont été conservées et prises en compte telles qu’observées.
+
+======================================================================
+M. MISE À JOUR DU 24 OCTOBRE 2026
+======================================================================
+
+Cette mise à jour complète l’audit initial du 20 octobre après les derniers changements du dépôt. Elle remplace les observations initiales explicitement signalées ci-dessous lorsqu’elles sont devenues obsolètes. Les autres constats de sécurité et de cohérence de l’audit initial n’ont pas été systématiquement réexaminés : ils ne doivent donc pas être considérés comme corrigés.
+
+NOUVEAUX PARCOURS AJOUTÉS
+
+- Sujets de mémoire : propositions, publication, sélection et décision avec historique ; la création/soumission d’un mémoire exige un sujet accepté attribué à l’étudiant.
+- Pré-soutenances : sessions, passages ordonnés, observations, recommandations, résultats, contrôles de conflits, historique et visibilité limitée selon le rôle.
+- Réunions d’encadrement : données privées entre étudiant et encadreur, actions assignées, états et historique.
+- Corrections : suivi lié à une version existante du mémoire et transitions d’état historisées.
+- Calendrier public des soutenances : lecture seule, publication explicite et sérialisation filtrée pour ne pas exposer les identités des étudiants/encadreurs, résultats ou documents.
+- Mentions de résultat : résolution centralisée à partir de seuils configurables par `ACADEMIC_GRADE_MENTIONS`. La configuration par défaut est vide ; aucun seuil institutionnel n’est présumé.
+- Imports CSV administrateur : gabarits et API de prévisualisation/confirmation pour les étudiants et membres du jury. Les rôles sont déterminés par le type d’import et ne proviennent pas du CSV ; les fichiers sont limités à 5 Mo et 5 000 lignes, les en-têtes doivent correspondre au gabarit, les doublons sont signalés et ignorés et toute autre ligne invalide empêche l’import complet. La confirmation vérifie l’empreinte du fichier prévisualisé.
+
+ROUTES AJOUTÉES OU ÉTENDUES
+
+- `GET|POST /api/thesis-subjects` et routes de publication, sélection, décision et détail, protégées par authentification et autorisations dédiées.
+- `GET|POST|PUT /api/pre-defense-sessions` et routes de statut et passages, sous `auth:sanctum` et `active`.
+- `GET|POST /api/supervision-meetings`, routes de détail, modification et actions, sous `auth:sanctum` et `active`.
+- `GET|POST /api/theses/{thesis}/corrections` et route de mise à jour de statut, sous `auth:sanctum` et `active`.
+- `GET /api/defense-calendar` : consultation publique filtrée des soutenances planifiées dont la publication est activée.
+- Sous `/api/admin/imports/{type}` : `GET /template`, `POST /preview`, `POST /confirm`, réservées aux administrateurs et aux types `students` ou `jury-members`.
+- La publication explicite d’une soutenance officielle est disponible via la route de publication du calendrier existant. Les horaires non publiés restent exclus de l’API publique.
+
+SCHÉMA ET MIGRATIONS
+
+- Ajout des migrations pour les notifications, sujets et historique, lien sujet-mémoire, indicateur de publication, corrections et historique, réunions/actions/historique d’encadrement, et sessions/passages/historique de pré-soutenance.
+- Ces fichiers définissent le schéma attendu ; aucune base configurée n’a été consultée et aucune migration n’a été exécutée pendant ces changements. La présence de la migration `notifications` dans le dépôt ne prouve donc pas que la table existe dans la base utilisée par l’application.
+- Les migrations des modules ajoutés sont datées `2026_10_25` alors que cette mise à jour est datée du `2026_10_24`. Vérifier/normaliser leur horodatage avant déploiement afin que l’ordre de migration corresponde à la chronologie attendue.
+
+CONSTATS INITIAUX À REMPLACER OU À REVALIDER
+
+- La mention « aucun test métier » et le décompte de deux tests d’exemple sont obsolètes : le dépôt comporte maintenant des tests de workflow, d’autorisation et de configuration pour les nouveaux modules.
+- Validation effectuée après les changements : `php artisan test --compact` réussit avec 24 tests et 91 assertions ; Pint ciblé et vérifications de syntaxe PHP des fichiers CSV passent. `git diff --check` ne signale pas d’erreur de whitespace, malgré des avertissements Git liés à CRLF/LF.
+- Une migration `create_notifications_table` a été ajoutée pour résoudre l’absence du schéma de notifications observée en exécution. Elle doit encore être appliquée à la base de déploiement.
+- Les diagnostics PHP signalés dans `Demoadvancethesis.php` (arguments `$actor` manquants et type de callback jury) ont été corrigés selon les changements du dépôt.
+- Les tests valident les nouveaux comportements dans l’environnement PHPUnit ; ils ne prouvent ni l’application des migrations sur la base réelle, ni le fonctionnement des queues, emails ou contraintes spécifiques au serveur SQL utilisé.
+- Le frontend demeure un squelette Laravel/Vite sans application Angular. Cette mise à jour porte sur le backend/API et n’ajoute pas d’interface Angular.
+- Les seuils de mention académique restent à fournir/valider par l’établissement ; sans configuration, aucune mention n’est déterminée.
+- Les constats initiaux relatifs à l’inscription et l’attribution des rôles, au périmètre des autres lectures API, à la recherche publique d’archives, aux liens version/mémoire, aux courses concurrentes et aux autres autorisations restent à vérifier séparément. Les changements décrits ici ne démontrent pas leur correction.
 
 FIN DU RAPPORT

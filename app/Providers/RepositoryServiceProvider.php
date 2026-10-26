@@ -19,11 +19,19 @@ use App\Services\Interfaces\DefenseScheduleServiceInterface;
 use App\Services\Interfaces\StudentServiceInterface;
 use App\Services\Interfaces\SupervisorServiceInterface;
 use App\Services\Interfaces\ThesisArchiveServiceInterface;
+use App\Services\Interfaces\ThesisCorrectionServiceInterface;
+use App\Services\Interfaces\PreDefenseServiceInterface;
 use App\Services\Interfaces\ThesisServiceInterface;
+use App\Services\Interfaces\ThesisSubjectServiceInterface;
+use App\Services\Interfaces\SupervisionMeetingServiceInterface;
 use App\Services\StudentService;
 use App\Services\SupervisorService;
 use App\Services\ThesisArchiveService;
+use App\Services\ThesisCorrectionService;
+use App\Services\PreDefenseService;
 use App\Services\ThesisService;
+use App\Services\ThesisSubjectService;
+use App\Services\SupervisionMeetingService;
 use Illuminate\Support\ServiceProvider;
 
 class RepositoryServiceProvider extends ServiceProvider
@@ -41,11 +49,15 @@ class RepositoryServiceProvider extends ServiceProvider
 
         $this->app->bind(ThesisRepositoryInterface::class, ThesisRepository::class);
         $this->app->bind(ThesisServiceInterface::class, ThesisService::class);
+        $this->app->bind(ThesisSubjectServiceInterface::class, ThesisSubjectService::class);
+        $this->app->bind(SupervisionMeetingServiceInterface::class, SupervisionMeetingService::class);
 
         $this->app->bind(DefenseScheduleRepositoryInterface::class, DefenseScheduleRepository::class);
         $this->app->bind(DefenseScheduleServiceInterface::class, DefenseScheduleService::class);
 
         $this->app->bind(ThesisArchiveServiceInterface::class, ThesisArchiveService::class);
+        $this->app->bind(ThesisCorrectionServiceInterface::class, ThesisCorrectionService::class);
+        $this->app->bind(PreDefenseServiceInterface::class, PreDefenseService::class);
     }
 
     public function boot(): void

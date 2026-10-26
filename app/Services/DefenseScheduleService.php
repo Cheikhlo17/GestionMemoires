@@ -258,6 +258,36 @@ class DefenseScheduleService implements DefenseScheduleServiceInterface
         return $schedule;
     }
 
+    public function setPublic(DefenseSchedule $schedule, bool $isPublic, User $actor): DefenseSchedule
+    {
+        Gate::forUser($actor)->authorize('publish', $schedule);
+
+        return DB::transaction(function () use ($schedule, $isPublic, $actor) {
+            $schedule = DefenseSchedule::query()->lockForUpdate()->findOrFail($schedule->id);
+            Gate::forUser($actor)->authorize('publish', $schedule);
+
+            if ($schedule->status !== DefenseSchedule::STATUS_SCHEDULED && $isPublic) {
+                throw ValidationException::withMessages([
+                    'is_public' => ['Only a scheduled defense can be made public.'],
+                ]);
+            }
+
+            $oldValue = $schedule->is_public;
+            $schedule->update(['is_public' => $isPublic]);
+
+            AuditLogger::log(
+                action: 'defense_publication_changed',
+                modelClass: DefenseSchedule::class,
+                modelId: $schedule->id,
+                oldValues: ['is_public' => $oldValue],
+                newValues: ['is_public' => $isPublic],
+                user: $actor
+            );
+
+            return $schedule->fresh(['thesis.student.user', 'thesis.department', 'thesis.program', 'room', 'juryMembers.user']);
+        });
+    }
+
     public function cancel(DefenseSchedule $schedule, string $reason, User $actor): DefenseSchedule
     {
         Gate::forUser($actor)->authorize('update', $schedule);

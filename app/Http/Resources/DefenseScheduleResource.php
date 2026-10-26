@@ -15,6 +15,7 @@ class DefenseScheduleResource extends JsonResource
             'ends_at' => $this->ends_at,
             'duration_minutes' => $this->duration_minutes,
             'status' => $this->status,
+            'is_public' => $this->is_public,
             'thesis' => [
                 'id' => $this->thesis->id,
                 'title' => $this->thesis->title,
