@@ -20,7 +20,7 @@ class SupervisorController extends Controller
 
     public function index(ListSupervisorsRequest $request): JsonResponse
     {
-        $supervisors = $this->supervisorService->list($request->validated());
+        $supervisors = $this->supervisorService->list($request->user(), $request->validated());
 
         return response()->json([
             'data' => SupervisorResource::collection($supervisors->items()),

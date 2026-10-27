@@ -66,9 +66,9 @@ class ProgramController extends Controller
             abort(403);
         }
 
-        if ($program->students()->exists()) {
+        if ($program->students()->withTrashed()->exists() || $program->theses()->withTrashed()->exists()) {
             return response()->json([
-                'message' => 'This program still has enrolled students and cannot be deleted.',
+                'message' => 'This program is still referenced by students or theses and cannot be deleted.',
             ], 422);
         }
 

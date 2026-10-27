@@ -3,11 +3,12 @@
 namespace App\Repositories\Interfaces;
 
 use App\Models\Supervisor;
+use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 interface SupervisorRepositoryInterface
 {
-    public function paginate(int $perPage, array $filters): LengthAwarePaginator;
+    public function paginate(int $perPage, array $filters, User $viewer): LengthAwarePaginator;
 
     public function find(int $id): ?Supervisor;
 

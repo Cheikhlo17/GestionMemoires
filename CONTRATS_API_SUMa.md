@@ -23,6 +23,19 @@ Ce document décrit l'implémentation observée ; il ne remplace pas les contrô
 - Les dates sont validées avec le validateur Laravel `date`, sans format strict unique. Envoyer de préférence les dates-heures au format ISO 8601 avec fuseau, par exemple `2026-10-25T09:00:00+00:00`. Les réponses de dates-heures suivent la sérialisation JSON de Laravel/Carbon.
 - Sauf précision, les listes renvoient une propriété `data`. Les actions de création ou mise à jour renvoient souvent aussi un `message`.
 
+## Portée des lectures et des rôles
+
+Les filtres transmis par le client ne peuvent pas élargir le périmètre imposé par le serveur.
+
+| Lecture | Administrateur | Responsable de département | Étudiant | Encadreur | Juré |
+|---|---|---|---|---|---|
+| Liste et fiche des mémoires | Tous les mémoires | Mémoires de son département | Ses propres mémoires | Mémoires qu'il encadre | Non autorisé |
+| Calendrier authentifié des soutenances | Tous les dossiers | Dossiers de son département | Ses dossiers | Dossiers qu'il encadre | Dossiers auxquels il est affecté |
+| Rapport PDF d'une soutenance | Tous les dossiers | Dossiers de son département | Participant au dossier | Encadreur affecté | Juré affecté |
+| Profils d'encadreurs | Tous les profils | Profils de son département | Encadreur de son dossier | Son propre profil | Encadreurs des dossiers auxquels il est affecté |
+
+Le calendrier public est distinct : il ne montre que les soutenances planifiées et explicitement publiées, sans identité des étudiants ou encadreurs, résultat ni document. L'inscription publique crée uniquement un compte étudiant ; `role_id` est refusé. Les comptes étudiants et jurés peuvent être importés par CSV (administrateur), et les comptes d'encadreur sont créés par la gestion des profils d'encadreur. Les opérations sous `/admin`, dont la suppression d'année académique, exigent le rôle administrateur.
+
 ## 1. Sujets de mémoire
 
 Routes déclarées dans `routes/api.php`, contrôleur `ThesisSubjectController`.

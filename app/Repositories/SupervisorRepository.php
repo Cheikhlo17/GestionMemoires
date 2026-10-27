@@ -4,18 +4,21 @@ namespace App\Repositories;
 
 use App\Models\Supervisor;
 use App\Models\Thesis;
+use App\Models\User;
 use App\Repositories\Interfaces\SupervisorRepositoryInterface;
+use App\Support\SupervisorVisibility;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class SupervisorRepository implements SupervisorRepositoryInterface
 {
-    public function __construct(protected Supervisor $model)
+    public function __construct(protected Supervisor $model, protected SupervisorVisibility $visibility)
     {
     }
 
-    public function paginate(int $perPage, array $filters): LengthAwarePaginator
+    public function paginate(int $perPage, array $filters, User $viewer): LengthAwarePaginator
     {
-        $query = $this->model->with(['user', 'department']);
+        $query = $this->visibility->scope($this->model->newQuery(), $viewer)
+            ->with(['user', 'department']);
 
         if (!empty($filters['search'])) {
             $search = $filters['search'];

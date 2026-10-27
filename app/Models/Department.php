@@ -32,4 +32,14 @@ class Department extends Model
     {
         return $this->hasMany(Student::class);
     }
+
+    public function supervisors(): HasMany
+    {
+        return $this->hasMany(Supervisor::class);
+    }
+
+    public function theses(): HasMany
+    {
+        return $this->hasMany(Thesis::class);
+    }
 }

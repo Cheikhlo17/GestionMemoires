@@ -69,9 +69,12 @@ class DepartmentController extends Controller
     {
         $this->authorize('delete', $department);
 
-        if ($department->students()->exists() || $department->programs()->exists()) {
+        if ($department->students()->withTrashed()->exists()
+            || $department->programs()->exists()
+            || $department->supervisors()->withTrashed()->exists()
+            || $department->theses()->withTrashed()->exists()) {
             return response()->json([
-                'message' => 'This department still has students or programs and cannot be deleted.',
+                'message' => 'This department is still referenced by students, programs, supervisors, or theses and cannot be deleted.',
             ], 422);
         }
 

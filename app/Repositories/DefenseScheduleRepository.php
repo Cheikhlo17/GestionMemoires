@@ -106,7 +106,9 @@ class DefenseScheduleRepository implements DefenseScheduleRepositoryInterface
         } elseif ($viewerRole === 'supervisor') {
             $query->whereHas('thesis.supervisor', fn ($q) => $q->where('user_id', $viewerId));
         } elseif ($viewerRole === 'jury-member') {
-            $query->whereHas('juryMembers', fn ($q) => $q->where('jury_members.user_id', $viewerId));
+            $query->whereHas('juryMembers', fn ($q) => $q
+                ->where('jury_members.user_id', $viewerId)
+                ->where('jury_members.is_active', true));
         } else {
             $query->whereKey(0);
         }

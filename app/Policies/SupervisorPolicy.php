@@ -4,9 +4,14 @@ namespace App\Policies;
 
 use App\Models\Supervisor;
 use App\Models\User;
+use App\Support\SupervisorVisibility;
 
 class SupervisorPolicy
 {
+    public function __construct(private SupervisorVisibility $visibility)
+    {
+    }
+
     public function viewAny(User $user): bool
     {
         return in_array($user->role?->slug, [
@@ -20,7 +25,7 @@ class SupervisorPolicy
 
     public function view(User $user, Supervisor $supervisor): bool
     {
-        return $this->viewAny($user);
+        return $this->viewAny($user) && $this->visibility->allows($user, $supervisor);
     }
 
     public function create(User $user): bool

@@ -19,9 +19,9 @@ class SupervisorService implements SupervisorServiceInterface
     {
     }
 
-    public function list(array $filters): LengthAwarePaginator
+    public function list(User $viewer, array $filters): LengthAwarePaginator
     {
-        return $this->supervisorRepository->paginate($filters['per_page'] ?? 15, $filters);
+        return $this->supervisorRepository->paginate($filters['per_page'] ?? 15, $filters, $viewer);
     }
 
     public function find(int $id): Supervisor
